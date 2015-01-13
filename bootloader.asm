@@ -1,4 +1,4 @@
-; vim:noet:sw=8:ts=8:ai
+; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
 ; USB Mass Storage Bootloader for PIC16(L)F1454/5/9
 ;
@@ -7,10 +7,31 @@
 ; to functions, and may be used as scratch registers inside of functions.
 
 	include "p16f1454.inc"
+	include "bdt.inc"
 	radix dec
 	list n=0,st=off
 	errorlevel -302
-	
+
+
+;;; Configuration
+	__config _CONFIG1, _FOSC_INTOSC & _WDTE_OFF & _PWRTE_ON & _MCLRE_ON & _CP_OFF & _BOREN_ON & _IESO_OFF & _FCMEN_OFF
+	__config _CONFIG2, _WRT_OFF & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LVP_OFF
+
+
+
+;;; Constants
+FOSC		equ	48000000
+BAUD		equ	38400
+BAUDVAL		equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
+
+EP0_BUF_SIZE 	equ	8	; endpoint 0 buffer size
+EP0OUT_EVEN_BUF	equ	BUF_START
+EP0OUT_ODD_BUF	equ	EP0OUT_EVEN_BUF+EP0_BUF_SIZE
+EP0IN_BUF	equ	EP0OUT_ODD_BUF+EP0_BUF_SIZE
+
+
+
+
 ;;; Macros
 	nolist
 ;;; Loads the address of the given symbol into FSR0.
@@ -21,11 +42,31 @@ ldfsr0	macro 	x
 	movwf	FSR0H
 	endm
 
+;;; Loads the given address in data space into FSR0.
+;;; (This ensures that the high bit is not set, which the high directive may
+;;; do implicitly)
+ldfsr0d	macro	x
+	movlw	low x
+	movwf	FSR0L
+	movlw	(high x) & 0x7F
+	movwf	FSR0H
+	endm
+
 ;;; Loads the address of the given symbol into FSR1.
 ldfsr1	macro 	x
 	movlw	low x
 	movwf	FSR1L
 	movlw	high x
+	movwf	FSR1H
+	endm
+
+;;; Loads the given address in data space into FSR1.
+;;; (This ensures that the high bit is not set, which the high directive may
+;;; do implicitly)
+ldfsr1d	macro	x
+	movlw	low x
+	movwf	FSR1L
+	movlw	(high x) & 0x7F
 	movwf	FSR1H
 	endm
 
@@ -41,13 +82,13 @@ ldpmadr	macro	x
 ;;; Waits until the bit in the specified register is set.
 waitfs	macro 	reg,bit
 	btfss	reg,bit
-	bra	$-1
+	goto	$-1
 	endm
 
 ;;; Waits until the bit in the specified register is cleared.
 waitfc	macro 	reg,bit
 	btfsc	reg,bit
-	bra	$-1
+	goto	$-1
 	endm
 
 ;;; Returns if the Z flag is set.
@@ -78,31 +119,21 @@ decw	macro
 	endm
 
 	
-
-;;; Configuration
-	list
-	__config _CONFIG1, _FCMEN_OFF & _IESO_OFF & _BOREN_OFF & _WDTE_OFF & _FOSC_INTOSC
-	__config _CONFIG2, _PLLEN_ENABLED & _PLLMULT_3x & _USBLSCLK_48MHz & _CPUDIV_NOCLKDIV
-
-
-
-;;; Constants
-FOSC	equ	48000000
-BAUD	equ	38400
-BAUDVAL	equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
-
-
-
-
+	
 ;;; Vectors
+	list
 	org	0x0000
 RESET_VECT
 	goto	bootloader_start
+	org	0x0004
+INTERRUPT_VECT
+	call	usb_service
+	retfie
 
 
 
 ;;; Main function
-	org	0x0005
+	org	0x0006
 bootloader_start
 ; Configure the oscillator (48MHz from INTOSC using 3x PLL)
 	banksel	OSCCON
@@ -115,6 +146,11 @@ _wait_osc_ready
 	andwf	OSCSTAT,w
 	sublw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	bnz	_wait_osc_ready
+
+; Enable active clock tuning
+	banksel	ACTCON
+	movlw	(1<<ACTSRC)|(1<<ACTEN)
+	movwf	ACTCON		; source = USB
 
 ; Turn on the LED
 	banksel TRISA
@@ -131,48 +167,152 @@ _wait_osc_ready
 	bsf	TXSTA,TXEN	; enable transmission
 
 ; Print a string
-loop	ldfsr0	STR_HELLO
+	ldfsr0	STR_ON
 	call	uart_print_str
 
-; Print a packed string
-	ldpmadr	STR_PACKED
-	call	uart_print_packed_str
+; Initialize USB
+	call	usb_init
+	call	usb_attach
+	bsf	INTCON,GIE	; enable interrupts
 
-; Print device ID
-	ldfsr0	STR_DEVID
-	call	uart_print_str
-	banksel	PMADRL
-	ldpmadr	0x8006		; device ID
-	bsf	PMCON1,CFGS	; select configuration space
-	bsf	PMCON1,RD	; read word
-	nop
-	nop
-	movfw	PMDATL		; move lsb to FSR0L
-	movwf	FSR0L
-	movfw	PMDATH		; move msb to W
-	call	uart_print_hex16
-	call	uart_print_nl
-	
-; Print revision ID
-	ldfsr0	STR_REVID
-	call	uart_print_str
-	banksel PMADRL
-	decf	PMADRL,f	; previous word is revision ID
-	bsf	PMCON1,RD	; read word
-	nop
-	nop
-	movfw	PMDATL		; move lsb to FSR0L
-	movwf	FSR0L
-	movfw	PMDATH		; move msb to W
-	call	uart_print_hex16
-	call	uart_print_nl
-
-; Toggle the LED
+; Main loop
+loop	
+; Blink the LED
 	banksel	LATA
 	movlw	(1<<LATA4)
 	xorwf	LATA,f
-; Loop
-	bra	loop
+; Perform USB tasks
+	goto	loop
+
+
+
+;;; Initializes the USB system and resets all associated registers.
+;;; arguments:	none
+;;; returns:	none
+;;; clobbers:	W, BSR, FSR0, FSR1H
+usb_init
+	ldfsr0	STR_USB_INIT
+	call	uart_print_str
+; disable USB interrupts
+	banksel	PIE2
+	bcf	PIE2,USBIE
+; clear USB registers
+	banksel	UEIR
+	clrf	UEIR
+	clrf	UIR
+; disable all endpoints
+	clrf	UEP0
+	clrf	UEP1
+	clrf	UEP2
+	clrf	UEP3
+	clrf	UEP4
+	clrf	UEP5
+	clrf	UEP6
+	clrf	UEP7
+; set configuration
+	movlw	(1<<UPUEN)|(1<<FSEN)|(1<<PPB0)
+	movwf	UCFG		; enable pullups, full speed, ping-pong buffer for EP0 OUT
+	movlw	(1<<BTSEE)|(1<<BTOEE)|(1<<DFN8EE)|(1<<CRC16EE)|(1<<CRC5EE)|(1<<PIDEE)
+	movwf	UEIE		; enable all error interrupts
+	movlw	(1<<STALLIE)|(1<<IDLEIE)|(1<<TRNIE)|(1<<UERRIE)|(1<<URSTIE)
+	movwf	UIE		; all interrupts except SOF and Bus Activity Detect
+; clear all BDT entries
+	ldfsr0d	BDT_START
+	movlw	BDT_LEN
+	movwf	FSR1H		; loop count
+	movlw	0
+_bdtclr	movwi	FSR0++
+	decfsz	FSR1H,f
+	goto	_bdtclr
+; reset ping-pong buffers and address
+	bsf	UCON,PPBRST
+	clrf	UADDR
+	bcf	UCON,PKTDIS	; enable packet processing
+	bcf	UCON,PPBRST	; clear ping-pong buffer reset flag
+; flush pending transactions
+_tflush	btfss	UIR,TRNIF
+	goto	_initep
+	bcf	UIR,TRNIF
+	call	_ret		; need at least 6 cycles before checking TRNIF again
+	goto	_tflush
+; initialize endpoint 0
+_initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
+	movwf	UEP0
+	ldfsr0d	EP0OUT_EVEN
+	movlw	EP0_BUF_SIZE
+	movwi	1[FSR0]		; set CNT
+	movlw	low EP0OUT_EVEN_BUF
+	movwi	2[FSR0]		; set ADRL
+	movlw	(EP0OUT_EVEN_BUF>>8)
+	movwi	3[FSR0]		; set ADRH
+	movlw	_DAT0|_BSTALL
+	movwi	0[FSR0]		; set STAT
+	bsf	INDF0,UOWN	; give ownership to SIE
+_ret	return	
+
+
+
+;;; Enables the USB module.
+;;; Assumes all registers have been properly configured by calling usb_init.
+;;; arguments:	none
+;;; returns:	none
+;;; clobbers:	W, BSR, FSR0
+usb_attach
+	ldfsr0	STR_USB_ATTACH
+	call	uart_print_str
+	banksel	UCON		; reset UCON
+	clrf	UCON
+	banksel	PIE2
+	bsf	PIE2,USBIE	; enable USB interrupts
+	bsf	INTCON,PEIE
+	banksel	UCON
+_usben	bsf	UCON,USBEN	; enable USB module and wait until ready
+	btfss	UCON,USBEN
+	goto	_usben
+	ldfsr0	STR_DONE
+	goto	uart_print_str
+
+
+
+;;; Services the USB bus.
+;;; Should be called from the interrupt handler, or at least every 1ms.
+usb_service
+	ldfsr0	STR_UEIR
+	call	uart_print_str
+	banksel	UEIR
+	movfw	UEIR
+	call	uart_print_hex
+	call	uart_print_str
+	banksel	UIR
+	movfw	UIR
+	call	uart_print_hex
+	call	uart_print_str
+	banksel	UCON
+	movfw	UCON
+	call	uart_print_hex
+	call	uart_print_nl
+	banksel	UIR
+; reset?
+	btfss	UIR,URSTIF
+	goto	_uidle
+	call	usb_init
+	banksel	PIE2
+	bsf	PIE2,USBIE	; reenable USB interrupts
+	banksel	UIR
+	bcf	UIR,URSTIF	; clear the flag
+; idle? just clear the flag
+_uidle	btfsc	UIR,IDLEIF
+	bcf	UIR,IDLEIF
+; error?
+	btfss	UIR,UERRIF
+	goto	_usdone
+	clrf	UEIR		; clear error flags
+	ldfsr0	STR_ERROR
+	call	uart_print_str
+; clear USB interrupt
+_usdone	banksel	PIR2
+	bcf	PIR2,USBIF
+	return
 
 
 
@@ -206,7 +346,7 @@ uart_print_str
 	moviw	FSR0++		; get a character and advance
 	retz			; return if zero
 	call	uart_print_char
-	bra	uart_print_str	; next character
+	goto	uart_print_str	; next character
 
 
 
@@ -234,7 +374,7 @@ _l1	bsf	PMCON1,RD	; initiate read
 	incf	PMADRL,f
 	skpnc
 	incf	PMADRH,f
-	bra	_l1
+	goto	_l1
 
 
 
@@ -275,12 +415,20 @@ uart_print_hex
 
 
 ;;; Strings
-STR_HELLO
-	dt	"hello, world\n\0"
-STR_DEVID
-	dt	"device id = \0"
-STR_REVID
-	dt	"revision id = \0"
-STR_PACKED
-	da	"abcdef\n\0"
+STR_ON
+	dt	"Power on\n\0"
+STR_USB_INIT
+	dt	"USB init\n\0"
+STR_USB_ATTACH
+	dt	"USB attach...\0"
+STR_UEIR
+	dt	"UEIR=\0"
+STR_UIR
+	dt	" UIR=\0"
+STR_UCON
+	dt	" UCON=\0"
+STR_ERROR
+	dt	"error\n\0"
+STR_DONE
+	dt	"done\n\0"
 	end	

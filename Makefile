@@ -49,6 +49,7 @@ dis: $(HEX)
 # Flash
 flash: $(HEX)
 	@echo "Device $(MDB_DEVICE)" \
+		"\nSet system.disableerrormsg true" \
 		"\nHwtool PICkit3 -p" \
 		"\nSet programoptions.eraseb4program true" \
 		"\nProgram \"$(HEX)\"" \
