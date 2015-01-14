@@ -26,17 +26,15 @@ BAUD		equ	38400
 BAUDVAL		equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
 
 EP0_BUF_SIZE 	equ	8	; endpoint 0 buffer size
-RESERVED_RAM_SZ	equ	2	; amount of RAM reserved by the bootloader
-EP0OUT_EVEN_BUF	equ	BUF_START+RESERVED_RAM_SZ
-EP0OUT_ODD_BUF	equ	EP0OUT_EVEN_BUF+EP0_BUF_SIZE
-EP0IN_BUF	equ	EP0OUT_ODD_BUF+EP0_BUF_SIZE
+RESERVED_RAM_SZ	equ	1	; amount of RAM reserved by the bootloader
+EP0OUT_BUF	equ	BUF_START+RESERVED_RAM_SZ
+EP0IN_BUF	equ	EP0OUT_BUF+EP0_BUF_SIZE
 
 
 
 ;;; Variables
 RESERVED_RAM	equ	BANKED_BUF_START
 USB_STATE	equ	RESERVED_RAM+0
-NEXT_EP0_OUT_BD	equ	RESERVED_RAM+1	; either 0x00 (even) or 0x04 (odd)
 
 ;;; USB_STATE bit flags
 LAST_EP0_WRITE	equ	0	; last endpoint 0 transaction is a control write
@@ -208,7 +206,6 @@ usb_init
 ; clear our state
 	banksel	USB_STATE
 	clrf	USB_STATE
-	clrf	NEXT_EP0_OUT_BD
 ; disable USB interrupts
 	banksel	PIE2
 	bcf	PIE2,USBIE
@@ -226,8 +223,8 @@ usb_init
 	clrf	UEP6
 	clrf	UEP7
 ; set configuration
-	movlw	(1<<UPUEN)|(1<<FSEN)|(1<<PPB0)
-	movwf	UCFG		; enable pullups, full speed, ping-pong buffer for EP0 OUT
+	movlw	(1<<UPUEN)|(1<<FSEN)
+	movwf	UCFG		; enable pullups, full speed, no ping-pong buffering
 	movlw	(1<<BTSEE)|(1<<BTOEE)|(1<<DFN8EE)|(1<<CRC16EE)|(1<<CRC5EE)|(1<<PIDEE)
 	movwf	UEIE		; enable all error interrupts
 	movlw	(1<<IDLEIE)|(1<<TRNIE)|(1<<UERRIE)|(1<<URSTIE)
@@ -254,17 +251,13 @@ _tflush	btfss	UIR,TRNIF
 ; initialize endpoint 0
 _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	UEP0
-	ldfsr0d	EP0OUT_EVEN
+	ldfsr0d	EP0OUT
 	movlw	EP0_BUF_SIZE
-	movwi	1[FSR0]		; set CNT for even
-	movwi	5[FSR0]		; set CNT for odd
-	movlw	low EP0OUT_EVEN_BUF
-	movwi	2[FSR0]		; set ADRL for even
-	movlw	low EP0OUT_ODD_BUF
-	movwi	6[FSR0]		; set ADRL for odd
-	movlw	(EP0OUT_EVEN_BUF>>8)
-	movwi	3[FSR0]		; set ADRH for even
-	movwi	7[FSR0]		; set ADRH for odd
+	movwi	1[FSR0]		; set CNT
+	movlw	low EP0OUT_BUF
+	movwi	2[FSR0]		; set ADRL
+	movlw	(EP0OUT_BUF>>8)
+	movwi	3[FSR0]		; set ADRH
 	movlw	_DAT0|_BSTALL
 	movwi	0[FSR0]		; set STAT
 	bsf	INDF0,UOWN	; give ownership to SIE
@@ -357,11 +350,6 @@ _usdone	banksel	PIR2
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_service_ep0
 	movwf	FSR1H		; save status in a temp register
-	banksel	USB_STATE
-	movlw	low EP0OUT_EVEN	; get the address of the next BDT entry
-	btfss	FSR1H,PPBI	; if not using the odd buffer, next buffer will be odd
-	addlw	BDT_ENTRY_SIZE
-	movwf	NEXT_EP0_OUT_BD
 	ldfsr0	STR_CTRL_EP0
 	call	uart_print_str
 	movfw	FSR1H
@@ -370,9 +358,7 @@ usb_service_ep0
 	btfsc	FSR1H,DIR	; is it an IN transfer or an OUT/SETUP?
 	goto	usb_ctrl_in
 ; it's an OUT or SETUP transfer
-	ldfsr0d	EP0OUT_EVEN	; load the current buffer pointer (EVEN or ODD)
-	btfsc	FSR1H,PPBI	; add 4 if last transaction wrote to the ODD buffer
-	addfsr	FSR0,BDT_ENTRY_SIZE
+	ldfsr0d	EP0OUT		; load the OUT buffer pointer
 	moviw	0[FSR0]		; get BD0STAT
 	andlw	b'00111100'	; isolate PID bits
 	sublw	PID_SETUP	; is it a SETUP packet?
@@ -386,12 +372,8 @@ usb_service_ep0
 ;;; returns:	none
 ;;; clobbers:	W, FSR0, FSR1
 usb_ctrl_setup
-; ensure none of the OUT endpoints are armed
-	bcf	INDF0,UOWN	; FSR0 currently points to BD0STAT (even or odd)
-	movlw	BDT_ENTRY_SIZE
-	xorwf	FSR0L,f		; clear UOWN in other buffer
-	bcf	INDF0,UOWN
-	xorwf	FSR0L,f		; bring pointer back to current buffer
+; ensure the OUT endpoint isn't armed
+	bcf	INDF0,UOWN	; FSR0 currently points to BD0STAT; clear UOWN
 ; get the address of the buffer
 	moviw	2[FSR0]		; get ADRL
 	movwf	FSR1H		; temporary
@@ -429,11 +411,9 @@ _usb_ctrl_complete
 	call	uart_print_str
 	ldfsr0d	EP0IN		; stall the IN endpoint
 	movlw	_DAT0|_DTSEN|_BSTALL
-	movwi	FSR0
+	movwi	0[FSR0]
 	bsf	INDF0,UOWN	; and arm it
-	banksel	USB_STATE
-	movfw	NEXT_EP0_OUT_BD	; get pointer to next OUT buffer
-	movwf	FSR0L
+	addfsr	FSR0,-BDT_ENTRY_SIZE	; point FSR0 at the OUT endpoint
 	movlw	_BSTALL
 	movwi	FSR0		; stall the OUT endpoint
 	bsf	INDF0,UOWN	; and arm it
