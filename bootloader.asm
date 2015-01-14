@@ -26,10 +26,21 @@ BAUD		equ	38400
 BAUDVAL		equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
 
 EP0_BUF_SIZE 	equ	8	; endpoint 0 buffer size
-EP0OUT_EVEN_BUF	equ	BUF_START
+RESERVED_RAM_SZ	equ	2	; amount of RAM reserved by the bootloader
+EP0OUT_EVEN_BUF	equ	BUF_START+RESERVED_RAM_SZ
 EP0OUT_ODD_BUF	equ	EP0OUT_EVEN_BUF+EP0_BUF_SIZE
 EP0IN_BUF	equ	EP0OUT_ODD_BUF+EP0_BUF_SIZE
 
+
+
+;;; Variables
+RESERVED_RAM	equ	BANKED_BUF_START
+USB_STATE	equ	RESERVED_RAM+0
+NEXT_EP0_OUT_BD	equ	RESERVED_RAM+1	; either 0x00 (even) or 0x04 (odd)
+
+;;; USB_STATE bit flags
+LAST_EP0_WRITE	equ	0	; last endpoint 0 transaction is a control write
+EP0_HANDLED	equ	1	; last endpoint 0 transaction was handled; will stall if 0
 
 
 
@@ -194,6 +205,10 @@ loop
 usb_init
 	ldfsr0	STR_USB_INIT
 	call	uart_print_str
+; clear our state
+	banksel	USB_STATE
+	clrf	USB_STATE
+	clrf	NEXT_EP0_OUT_BD
 ; disable USB interrupts
 	banksel	PIE2
 	bcf	PIE2,USBIE
@@ -215,8 +230,8 @@ usb_init
 	movwf	UCFG		; enable pullups, full speed, ping-pong buffer for EP0 OUT
 	movlw	(1<<BTSEE)|(1<<BTOEE)|(1<<DFN8EE)|(1<<CRC16EE)|(1<<CRC5EE)|(1<<PIDEE)
 	movwf	UEIE		; enable all error interrupts
-	movlw	(1<<STALLIE)|(1<<IDLEIE)|(1<<TRNIE)|(1<<UERRIE)|(1<<URSTIE)
-	movwf	UIE		; all interrupts except SOF and Bus Activity Detect
+	movlw	(1<<IDLEIE)|(1<<TRNIE)|(1<<UERRIE)|(1<<URSTIE)
+	movwf	UIE		; all interrupts except stall, SOF, and Bus Activity Detect
 ; clear all BDT entries
 	ldfsr0d	BDT_START
 	movlw	BDT_LEN
@@ -241,11 +256,15 @@ _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	UEP0
 	ldfsr0d	EP0OUT_EVEN
 	movlw	EP0_BUF_SIZE
-	movwi	1[FSR0]		; set CNT
+	movwi	1[FSR0]		; set CNT for even
+	movwi	5[FSR0]		; set CNT for odd
 	movlw	low EP0OUT_EVEN_BUF
-	movwi	2[FSR0]		; set ADRL
+	movwi	2[FSR0]		; set ADRL for even
+	movlw	low EP0OUT_ODD_BUF
+	movwi	6[FSR0]		; set ADRL for odd
 	movlw	(EP0OUT_EVEN_BUF>>8)
-	movwi	3[FSR0]		; set ADRH
+	movwi	3[FSR0]		; set ADRH for even
+	movwi	7[FSR0]		; set ADRH for odd
 	movlw	_DAT0|_BSTALL
 	movwi	0[FSR0]		; set STAT
 	bsf	INDF0,UOWN	; give ownership to SIE
@@ -304,7 +323,7 @@ usb_service
 	bsf	PIE2,USBIE	; reenable USB interrupts
 	banksel	UIR
 	bcf	UIR,URSTIF	; clear the flag
-; idle? just clear the flag
+; idle? just clear the flag (TODO)
 _uidle	btfsc	UIR,IDLEIF
 	bcf	UIR,IDLEIF
 ; error?
@@ -313,9 +332,9 @@ _uidle	btfsc	UIR,IDLEIF
 	clrf	UEIR		; clear error flags
 	ldfsr0	STR_ERROR
 	call	uart_print_str
-	banksel	UIR
 ; service transactions
-_utrans	btfss	UIR,TRNIF
+_utrans	banksel	UIR
+	btfss	UIR,TRNIF
 	goto	_usdone
 	movfw	USTAT		; stash the status in a temp register
 	movwf	FSR1H
@@ -338,6 +357,11 @@ _usdone	banksel	PIR2
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_service_ep0
 	movwf	FSR1H		; save status in a temp register
+	banksel	USB_STATE
+	movlw	low EP0OUT_EVEN	; get the address of the next BDT entry
+	btfss	FSR1H,PPBI	; if not using the odd buffer, next buffer will be odd
+	addlw	BDT_ENTRY_SIZE
+	movwf	NEXT_EP0_OUT_BD
 	ldfsr0	STR_CTRL_EP0
 	call	uart_print_str
 	movfw	FSR1H
@@ -360,10 +384,84 @@ usb_service_ep0
 ;;; Handles a SETUP control transfer on endpoint 0.
 ;;; arguments:	pointer to current BDT entry in FSR0
 ;;; returns:	none
-;;; clobbers:
+;;; clobbers:	W, FSR0, FSR1
 usb_ctrl_setup
-	ldfsr0	STR_CTRL_SETUP
-	goto	uart_print_str
+; ensure none of the OUT endpoints are armed
+	bcf	INDF0,UOWN	; FSR0 currently points to BD0STAT (even or odd)
+	movlw	BDT_ENTRY_SIZE
+	xorwf	FSR0L,f		; clear UOWN in other buffer
+	bcf	INDF0,UOWN
+	xorwf	FSR0L,f		; bring pointer back to current buffer
+; get the address of the buffer
+	moviw	2[FSR0]		; get ADRL
+	movwf	FSR1H		; temporary
+	moviw	3[FSR0]		; get ADRH
+	movwf	FSR0H
+	movfw	FSR1H		; bring ADRL out of temporary
+	movwf	FSR0L
+; check if this is a standard request (first byte)
+	moviw	0[FSR0]
+	andlw	b'01100000'	; bits 5 and 6 should be 0 for a standard request
+	bnz	_usb_ctrl_complete
+; get the request number (second byte)
+	moviw	1[FSR0]
+	movwf	FSR1H		; save in a temporary
+; is it GET_DESCRIPTOR?
+	movlw	GET_DESCRIPTOR
+	subwf	FSR1H,w
+	bz	_usb_get_descriptor
+; unhandled request
+	ldfsr0	STR_UNHANDLED_REQUEST
+	call	uart_print_str
+	movfw	FSR1H
+	call	uart_print_hex
+	call	uart_print_nl
+
+; Finishes a SETUP transaction.
+_usb_ctrl_complete
+	banksel	UCON
+	bcf	UCON,PKTDIS	; reenable packet processing
+; if the request wasn't handled, stall
+	banksel	USB_STATE
+	btfsc	USB_STATE,EP0_HANDLED
+	goto	_derp
+	ldfsr0	STR_STALL
+	call	uart_print_str
+	ldfsr0d	EP0IN		; stall the IN endpoint
+	movlw	_DAT0|_DTSEN|_BSTALL
+	movwi	FSR0
+	bsf	INDF0,UOWN	; and arm it
+	banksel	USB_STATE
+	movfw	NEXT_EP0_OUT_BD	; get pointer to next OUT buffer
+	movwf	FSR0L
+	movlw	_BSTALL
+	movwi	FSR0		; stall the OUT endpoint
+	bsf	INDF0,UOWN	; and arm it
+	return
+
+_derp	banksel	USB_STATE
+	bcf	USB_STATE,EP0_HANDLED	; clear for next transaction
+	return
+
+; Handles a GET_DESCRIPTOR request.
+; Pointer to request buffer is in FSR0.
+_usb_get_descriptor
+	moviw	3[FSR0]
+	movwf	FSR1H		; save in a temporary
+; device descriptor?
+	movlw	DESC_DEVICE
+	subwf	FSR1H,w
+	bnz	_other_descriptor
+	;banksel	USB_STATE
+	;bsf	USB_STATE,EP0_HANDLED
+
+_other_descriptor
+	ldfsr0	STR_UNHANDLED_DESCRIPTOR
+	call	uart_print_str
+	movfw	FSR1H
+	call	uart_print_hex
+	call	uart_print_nl
+	goto	_usb_ctrl_complete
 
 
 
@@ -485,6 +583,25 @@ uart_print_hex
 	goto	uart_print_char
 
 
+
+;;; Descriptors
+DEVICE_DESCRIPTOR
+	dt	0x12		; bLength
+	dt	0x01		; bDescriptorType
+	dt	0x00, 0x02	; bcdUSB USB 2.0
+	dt	0xFF		; bDeviceClass (vendor-defined)
+	dt	0x00		; bDeviceSubclass
+	dt	0x00		; bDeviceProtocol
+	dt	0x08		; bMaxPacketSize0 (8 bytes)
+	dt	0xd8, 0x04	; idVendor (Microchip)
+	dt	0xdd, 0xdd	; idProduct (fake value)
+	dt	0x01, 0x00	; bcdDevice (1)
+	dt	0x00		; iManufacturer (TODO)
+	dt	0x00		; iProduct (TODO)
+	dt	0x00		; iSerialNumber (TODO)
+	dt	0x01		; bNumConfigurations
+
+
 ;;; Strings
 STR_ON
 	dt	"Power on\n\0"
@@ -508,6 +625,14 @@ STR_CTRL_OUT
 	dt	"control OUT\n\0"
 STR_CTRL_IN
 	dt	"control IN\n\0"
+STR_UNHANDLED_REQUEST
+	dt	"unhandled request \0"
+STR_GET_DESCRIPTOR
+	dt	"GET_DESCRIPTOR\n\0"
+STR_UNHANDLED_DESCRIPTOR
+	dt	"unhandled descriptor \0"
+STR_STALL
+	dt	"sending STALL\n\0"
 STR_DONE
 	dt	"done\n\0"
 	end	
