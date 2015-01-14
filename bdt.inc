@@ -232,11 +232,19 @@ _UCPU		equ	0x00
 
 
 
-; BDnSTAT bit numbers
+; BDnSTAT bit numbers (CPU mode)
 UOWN		equ	7
 DTS		equ	6
 DTSEN		equ	3
 BSTALL		equ	2
 BC9		equ	1
 BC8		equ	0
+
+
+
+; BDnSTAT bit numbers (SIE mode)
+PID3		equ	5
+PID2		equ	4
+PID1		equ	3
+PID0		equ	2
 

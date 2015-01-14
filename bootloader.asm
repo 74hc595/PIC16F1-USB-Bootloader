@@ -8,6 +8,7 @@
 
 	include "p16f1454.inc"
 	include "bdt.inc"
+	include "usb.inc"
 	radix dec
 	list n=0,st=off
 	errorlevel -302
@@ -276,6 +277,9 @@ _usben	bsf	UCON,USBEN	; enable USB module and wait until ready
 
 ;;; Services the USB bus.
 ;;; Should be called from the interrupt handler, or at least every 1ms.
+;;; arguments:	none
+;;; returns:	none
+;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_service
 	ldfsr0	STR_UEIR
 	call	uart_print_str
@@ -305,14 +309,81 @@ _uidle	btfsc	UIR,IDLEIF
 	bcf	UIR,IDLEIF
 ; error?
 	btfss	UIR,UERRIF
-	goto	_usdone
+	goto	_utrans
 	clrf	UEIR		; clear error flags
 	ldfsr0	STR_ERROR
 	call	uart_print_str
+	banksel	UIR
+; service transactions
+_utrans	btfss	UIR,TRNIF
+	goto	_usdone
+	movfw	USTAT		; stash the status in a temp register
+	movwf	FSR1H
+	bcf	UIR,TRNIF	; clear flag and advance USTAT fifo
+	andlw	b'01111000'	; check endpoint number
+	bnz	_utrans		; if not endpoint 0, loop (TODO)
+	movfw	FSR1H		; bring original USTAT value back to W
+	call	usb_service_ep0	; handle the control message
+	goto	_utrans
 ; clear USB interrupt
 _usdone	banksel	PIR2
 	bcf	PIR2,USBIF
 	return
+
+
+
+;;; Handles a control transfer on endpoint 0.
+;;; arguments:	USTAT value in W
+;;; returns:	none
+;;; clobbers:	W, BSR, FSR0, FSR1H
+usb_service_ep0
+	movwf	FSR1H		; save status in a temp register
+	ldfsr0	STR_CTRL_EP0
+	call	uart_print_str
+	movfw	FSR1H
+	call	uart_print_hex
+	call	uart_print_nl
+	btfsc	FSR1H,DIR	; is it an IN transfer or an OUT/SETUP?
+	goto	usb_ctrl_in
+; it's an OUT or SETUP transfer
+	ldfsr0d	EP0OUT_EVEN	; load the current buffer pointer (EVEN or ODD)
+	btfsc	FSR1H,PPBI	; add 4 if last transaction wrote to the ODD buffer
+	addfsr	FSR0,BDT_ENTRY_SIZE
+	moviw	0[FSR0]		; get BD0STAT
+	andlw	b'00111100'	; isolate PID bits
+	sublw	PID_SETUP	; is it a SETUP packet?
+	bnz	usb_ctrl_out	; if not, it's a regular OUT
+	; it's a SETUP packet--fall through
+
+
+
+;;; Handles a SETUP control transfer on endpoint 0.
+;;; arguments:	pointer to current BDT entry in FSR0
+;;; returns:	none
+;;; clobbers:
+usb_ctrl_setup
+	ldfsr0	STR_CTRL_SETUP
+	goto	uart_print_str
+
+
+
+;;; Handles an OUT control transfer on endpoint 0.
+;;; arguments:	pointer to current BDT entry in FSR0
+;;; returns:	none
+;;; clobbers:
+usb_ctrl_out
+	ldfsr0	STR_CTRL_OUT
+	goto	uart_print_str
+
+
+
+;;; Handles an IN control transfer on endpoint 0.
+;;; arguments:	pointer to current BDT entry in FSR0
+;;; returns:	none
+;;; clobbers:	
+usb_ctrl_in
+	ldfsr0	STR_CTRL_IN
+	goto	uart_print_str
 
 
 
@@ -429,6 +500,14 @@ STR_UCON
 	dt	" UCON=\0"
 STR_ERROR
 	dt	"error\n\0"
+STR_CTRL_EP0
+	dt	"servicing endpoint 0, USTAT=\0"
+STR_CTRL_SETUP
+	dt	"control SETUP\n\0"
+STR_CTRL_OUT
+	dt	"control OUT\n\0"
+STR_CTRL_IN
+	dt	"control IN\n\0"
 STR_DONE
 	dt	"done\n\0"
 	end	
