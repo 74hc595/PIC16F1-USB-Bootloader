@@ -18,6 +18,21 @@ PID_SETUP	equ	(0xD<<PID0)
 PID_STALL	equ	(0xE<<PID0)
 PID_MDATA	equ	(0xF<<PID0)
 
+; SETUP data packet fields
+bmRequestType	equ	0
+bRequest	equ	1
+wValueL		equ	2
+wValueH		equ	3
+wIndexL		equ	4
+wIndexH		equ	5
+wLengthL	equ	6
+wLengthH	equ	7
+
+; bmRequestType bit masks
+_DIRECTION	equ	b'10000000'
+_REQ_TYPE	equ	b'01100000'
+_RECIPIENT	equ	b'00011111'
+
 ; Standard device requests
 GET_STATUS	equ	0x00
 CLEAR_FEATURE	equ	0x01

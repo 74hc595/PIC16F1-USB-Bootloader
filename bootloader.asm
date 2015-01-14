@@ -21,24 +21,26 @@
 
 
 ;;; Constants
-FOSC		equ	48000000
+FOSC			equ	48000000
 BAUD		equ	38400
-BAUDVAL		equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
+BAUDVAL			equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
 
-EP0_BUF_SIZE 	equ	8	; endpoint 0 buffer size
-RESERVED_RAM_SZ	equ	1	; amount of RAM reserved by the bootloader
-EP0OUT_BUF	equ	BUF_START+RESERVED_RAM_SZ
-EP0IN_BUF	equ	EP0OUT_BUF+EP0_BUF_SIZE
+EP0_BUF_SIZE 		equ	8	; endpoint 0 buffer size
+RESERVED_RAM_SIZE	equ	1	; amount of RAM reserved by the bootloader
+EP0OUT_BUF		equ	BUF_START+RESERVED_RAM_SIZE
+EP0IN_BUF		equ	EP0OUT_BUF+EP0_BUF_SIZE
+BANKED_EP0OUT_BUF	equ	BANKED_BUF_START+RESERVED_RAM_SIZE
+BANKED_EP0IN_BUF	equ	BANKED_EP0OUT_BUF+EP0_BUF_SIZE	; EP0IN buffer spills over to bank 1... deal with it
 
 
 
 ;;; Variables
-RESERVED_RAM	equ	BANKED_BUF_START
-USB_STATE	equ	RESERVED_RAM+0
+RESERVED_RAM		equ	BANKED_BUF_START
+USB_STATE		equ	RESERVED_RAM+0
 
-;;; USB_STATE bit flags
-LAST_EP0_WRITE	equ	0	; last endpoint 0 transaction is a control write
-EP0_HANDLED	equ	1	; last endpoint 0 transaction was handled; will stall if 0
+; USB_STATE bit flags
+LAST_EP0_WRITE		equ	0	; last endpoint 0 transaction is a control write
+EP0_HANDLED		equ	1	; last endpoint 0 transaction was handled; will stall if 0
 
 
 
@@ -251,16 +253,16 @@ _tflush	btfss	UIR,TRNIF
 ; initialize endpoint 0
 _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	UEP0
-	ldfsr0d	EP0OUT
-	movlw	EP0_BUF_SIZE
-	movwi	1[FSR0]		; set CNT
-	movlw	low EP0OUT_BUF
-	movwi	2[FSR0]		; set ADRL
-	movlw	(EP0OUT_BUF>>8)
-	movwi	3[FSR0]		; set ADRH
-	movlw	_DAT0|_BSTALL
-	movwi	0[FSR0]		; set STAT
-	bsf	INDF0,UOWN	; give ownership to SIE
+	banksel	BANKED_EP0OUT
+	movlw	EP0_BUF_SIZE	; set CNT
+	movwf	BANKED_EP0OUT_CNT
+	movlw	low EP0OUT_BUF	; set ADRL
+	movwf	BANKED_EP0OUT_ADRL
+	movlw	EP0OUT_BUF>>8	; set ADRH
+	movwf	BANKED_EP0OUT_ADRH
+	movlw	_DAT0|_BSTALL	; set STAT
+	movwf	BANKED_EP0OUT_STAT
+	bsf	BANKED_EP0OUT_STAT,UOWN	; give ownership to SIE
 _ret	return	
 
 
@@ -355,11 +357,11 @@ usb_service_ep0
 	movfw	FSR1H
 	call	uart_print_hex
 	call	uart_print_nl
+	banksel	BANKED_EP0OUT
 	btfsc	FSR1H,DIR	; is it an IN transfer or an OUT/SETUP?
 	goto	usb_ctrl_in
 ; it's an OUT or SETUP transfer
-	ldfsr0d	EP0OUT		; load the OUT buffer pointer
-	moviw	0[FSR0]		; get BD0STAT
+	movfw	BANKED_EP0OUT_STAT
 	andlw	b'00111100'	; isolate PID bits
 	sublw	PID_SETUP	; is it a SETUP packet?
 	bnz	usb_ctrl_out	; if not, it's a regular OUT
@@ -368,34 +370,25 @@ usb_service_ep0
 
 
 ;;; Handles a SETUP control transfer on endpoint 0.
-;;; arguments:	pointer to current BDT entry in FSR0
+;;; arguments:	BSR=0
 ;;; returns:	none
-;;; clobbers:	W, FSR0, FSR1
+;;; clobbers:
 usb_ctrl_setup
 ; ensure the OUT endpoint isn't armed
-	bcf	INDF0,UOWN	; FSR0 currently points to BD0STAT; clear UOWN
-; get the address of the buffer
-	moviw	2[FSR0]		; get ADRL
-	movwf	FSR1H		; temporary
-	moviw	3[FSR0]		; get ADRH
-	movwf	FSR0H
-	movfw	FSR1H		; bring ADRL out of temporary
-	movwf	FSR0L
-; check if this is a standard request (first byte)
-	moviw	0[FSR0]
-	andlw	b'01100000'	; bits 5 and 6 should be 0 for a standard request
-	bnz	_usb_ctrl_complete
-; get the request number (second byte)
-	moviw	1[FSR0]
-	movwf	FSR1H		; save in a temporary
-; is it GET_DESCRIPTOR?
+	bcf	BANKED_EP0OUT_STAT,UOWN	; take ownership of EP0 OUT buffer
+; get bmRequestType
+	movlw	_REQ_TYPE
+	andwf	BANKED_EP0OUT_BUF+bmRequestType,w
+	bnz	_unhreq			; ignore non-standard requests
+; check request number: is it GET_DESCRIPTOR?
 	movlw	GET_DESCRIPTOR
-	subwf	FSR1H,w
+	subwf	BANKED_EP0OUT_BUF+bRequest,w
 	bz	_usb_get_descriptor
 ; unhandled request
-	ldfsr0	STR_UNHANDLED_REQUEST
+_unhreq	ldfsr0	STR_UNHANDLED_REQUEST
 	call	uart_print_str
-	movfw	FSR1H
+	banksel	BANKED_EP0OUT_BUF
+	movfw	BANKED_EP0OUT_BUF+bRequest
 	call	uart_print_hex
 	call	uart_print_nl
 
@@ -409,14 +402,13 @@ _usb_ctrl_complete
 	goto	_derp
 	ldfsr0	STR_STALL
 	call	uart_print_str
-	ldfsr0d	EP0IN		; stall the IN endpoint
+	banksel	BANKED_EP0IN
 	movlw	_DAT0|_DTSEN|_BSTALL
-	movwi	0[FSR0]
-	bsf	INDF0,UOWN	; and arm it
-	addfsr	FSR0,-BDT_ENTRY_SIZE	; point FSR0 at the OUT endpoint
+	movwf	BANKED_EP0IN_STAT	; stall the EP0 IN endpoint
+	bsf	BANKED_EP0IN_STAT,UOWN	; and arm it
 	movlw	_BSTALL
-	movwi	FSR0		; stall the OUT endpoint
-	bsf	INDF0,UOWN	; and arm it
+	movwf	BANKED_EP0OUT_STAT	; stall the OUT endpoint
+	bsf	BANKED_EP0OUT_STAT,UOWN	; and arm it
 	return
 
 _derp	banksel	USB_STATE
@@ -424,13 +416,11 @@ _derp	banksel	USB_STATE
 	return
 
 ; Handles a GET_DESCRIPTOR request.
-; Pointer to request buffer is in FSR0.
+; BSR=0
 _usb_get_descriptor
-	moviw	3[FSR0]
-	movwf	FSR1H		; save in a temporary
-; device descriptor?
+; check descriptor type: is it a device descriptor request?
 	movlw	DESC_DEVICE
-	subwf	FSR1H,w
+	subwf	BANKED_EP0OUT_BUF+wValueH,w
 	bnz	_other_descriptor
 	;banksel	USB_STATE
 	;bsf	USB_STATE,EP0_HANDLED
@@ -438,7 +428,8 @@ _usb_get_descriptor
 _other_descriptor
 	ldfsr0	STR_UNHANDLED_DESCRIPTOR
 	call	uart_print_str
-	movfw	FSR1H
+	banksel	BANKED_EP0OUT_BUF
+	movfw	BANKED_EP0OUT_BUF+wValueH
 	call	uart_print_hex
 	call	uart_print_nl
 	goto	_usb_ctrl_complete
@@ -446,7 +437,7 @@ _other_descriptor
 
 
 ;;; Handles an OUT control transfer on endpoint 0.
-;;; arguments:	pointer to current BDT entry in FSR0
+;;; arguments:	BSR=0
 ;;; returns:	none
 ;;; clobbers:
 usb_ctrl_out
@@ -456,7 +447,7 @@ usb_ctrl_out
 
 
 ;;; Handles an IN control transfer on endpoint 0.
-;;; arguments:	pointer to current BDT entry in FSR0
+;;; arguments:	BSR=0
 ;;; returns:	none
 ;;; clobbers:	
 usb_ctrl_in
