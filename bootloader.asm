@@ -351,7 +351,10 @@ _utrans	banksel	UIR
 	call	usb_service_ep0	; handle the control message
 	goto	_utrans
 ; clear USB interrupt
-_usdone	banksel	PIR2
+_usdone	movlw	'_'
+	call	uart_print_char
+	call	uart_print_nl
+	banksel	PIR2
 	bcf	PIR2,USBIF
 	return
 
@@ -438,6 +441,9 @@ _usb_ctrl_complete
 	movlw	_DAT0|_DTSEN|_BSTALL
 	movwf	BANKED_EP0IN_STAT	; stall the EP0 IN endpoint
 	bsf	BANKED_EP0IN_STAT,UOWN	; and arm it
+	movlw	EP0_BUF_SIZE
+	movwf	BANKED_EP0OUT_CNT
+	movlw	_DAT0|_DTSEN|_BSTALL
 	movwf	BANKED_EP0OUT_STAT	; stall the OUT endpoint
 	bsf	BANKED_EP0OUT_STAT,UOWN	; and arm it
 	return
@@ -452,7 +458,10 @@ _cread	call	ep0_read_in		; read data into IN buffer
 	movlw	_DAT1|_DTSEN		; arm IN buffer
 	movwf	BANKED_EP0IN_STAT
 	bsf	BANKED_EP0IN_STAT,UOWN
-_armout	movwf	BANKED_EP0OUT_STAT	; arm OUT buffer for status stage
+_armout	movlw	EP0_BUF_SIZE
+	movwf	BANKED_EP0OUT_CNT
+	movlw	_DAT1|_DTSEN
+	movwf	BANKED_EP0OUT_STAT	; arm OUT buffer for status stage
 	bsf	BANKED_EP0OUT_STAT,UOWN
 	return
 
@@ -511,6 +520,17 @@ _usb_set_address
 _usb_ctrl_out
 	ldfsr0	STR_CTRL_OUT
 	call	uart_print_str
+
+; Only time this will get called is in the status stage of a control read,
+; since we don't support any control writes with a data stage.
+; All we have to do is re-arm the OUT endpoint.
+	banksel	BANKED_EP0OUT_STAT
+	movlw	EP0_BUF_SIZE
+	movwf	BANKED_EP0OUT_CNT
+	movlw	_DAT0|_DTSEN|_BSTALL
+	movwf	BANKED_EP0OUT_STAT
+	bsf	BANKED_EP0OUT_STAT,UOWN
+
 	if 0
 	banksel	BANKED_EP0OUT_STAT
 	movfw	BANKED_EP0OUT_STAT
@@ -584,13 +604,6 @@ _usb_ctrl_out
 	call	uart_print_nl
 	endif
 
-; Only time this will get called is in the status stage of a control read,
-; since we don't support any control writes with a data stage.
-; All we have to do is re-arm the OUT endpoint.
-	banksel	BANKED_EP0OUT_STAT
-	movlw	_BSTALL
-	movwf	BANKED_EP0OUT_STAT
-	bsf	BANKED_EP0OUT_STAT,UOWN
 	return
 
 
