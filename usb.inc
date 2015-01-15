@@ -58,3 +58,6 @@ DESC_DEV_QUAL	equ	0x06
 DESC_OTHER_SPD	equ	0x07
 DESC_INTF_PWR	equ	0x08
 DESC_OTG	equ	0x09
+
+; Length of fixed-size descriptors
+DESC_DEVICE_LEN	equ	18
