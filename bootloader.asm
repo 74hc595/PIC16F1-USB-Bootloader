@@ -42,9 +42,10 @@ EP0_DATA_IN_PTRH	equ	RESERVED_RAM+2	;   in the current EP0 IN transaction
 EP0_DATA_IN_COUNT	equ	RESERVED_RAM+3	; remaining bytes to be sent
 
 ; USB_STATE bit flags
-LAST_EP0_WRITE		equ	0	; last endpoint 0 transaction is a control write
+IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
 EP0_HANDLED		equ	1	; last endpoint 0 transaction was handled; will stall if 0
-EP0_IN_ALL_SENT		equ	2	; all data packets for EP0 IN transaction have been sent
+ADDRESS_PENDING		equ	2	; need to set address in next IN transaction
+EP0_IN_ALL_SENT		equ	3	; all data packets for EP0 IN transaction have been sent
 
 
 ;;; Macros
@@ -390,8 +391,11 @@ usb_ctrl_setup
 ; ensure the OUT endpoint isn't armed
 	bcf	BANKED_EP0OUT_STAT,UOWN	; take ownership of EP0 OUT buffer
 	bcf	USB_STATE,EP0_IN_ALL_SENT
+	bcf	USB_STATE,IS_CONTROL_WRITE
 ; get bmRequestType
 	movfw	BANKED_EP0OUT_BUF+bmRequestType
+	btfss	BANKED_EP0OUT_BUF+bmRequestType,7	; is this host->device?
+	bsf	USB_STATE,IS_CONTROL_WRITE		; if so, this is a control write
 	call	uart_print_hex
 	movlw	' '
 	call	uart_print_char
@@ -408,6 +412,10 @@ usb_ctrl_setup
 	movlw	GET_DESCRIPTOR
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
 	bz	_usb_get_descriptor
+; is it SET_ADDRESS?
+	movlw	SET_ADDRESS
+	subwf	BANKED_EP0OUT_BUF+bRequest,w
+	bz	_usb_set_address
 ; unhandled request
 _unhreq	ldfsr0	STR_UNHANDLED_REQUEST
 	call	uart_print_str
@@ -436,7 +444,7 @@ _usb_ctrl_complete
 
 _cvalid	banksel	USB_STATE
 	bcf	USB_STATE,EP0_HANDLED	; clear for next transaction
-	btfsc	USB_STATE,LAST_EP0_WRITE
+	btfsc	USB_STATE,IS_CONTROL_WRITE
 	goto	_cwrite
 ; this is a control read; prepare the IN endpoint for the data stage
 ; and the OUT endpoint for the status stage
@@ -444,13 +452,17 @@ _cread	call	ep0_read_in		; read data into IN buffer
 	movlw	_DAT1|_DTSEN		; arm IN buffer
 	movwf	BANKED_EP0IN_STAT
 	bsf	BANKED_EP0IN_STAT,UOWN
-	movwf	BANKED_EP0OUT_STAT	; arm OUT buffer for status stage
+_armout	movwf	BANKED_EP0OUT_STAT	; arm OUT buffer for status stage
 	bsf	BANKED_EP0OUT_STAT,UOWN
+	return
+
 ; this is a control write: prepare the IN endpoint for the status stage
 ; and the OUT endpoint for the next SETUP transaction
-_cwrite
-	; TODO
-	return
+_cwrite	movlw	_DAT1|_DTSEN
+	movwf	BANKED_EP0IN_STAT	; arm IN buffer for status stage
+	bsf	BANKED_EP0IN_STAT,UOWN
+	movlw	_BSTALL
+	goto	_armout
 
 ; Handles a GET_DESCRIPTOR request.
 ; BSR=0
@@ -464,7 +476,7 @@ _usb_get_descriptor
 	movwf	EP0_DATA_IN_PTRL
 	movlw	high DEVICE_DESCRIPTOR
 	movwf	EP0_DATA_IN_PTRH
-	movlw	8;DESC_DEVICE_LEN
+	movlw	DESC_DEVICE_LEN
 	movwf	EP0_DATA_IN_COUNT
 	bsf	USB_STATE,EP0_HANDLED
 	goto	_usb_ctrl_complete
@@ -476,6 +488,20 @@ _other_descriptor
 	movfw	BANKED_EP0OUT_BUF+wValueH
 	call	uart_print_hex
 	call	uart_print_nl
+	goto	_usb_ctrl_complete
+
+; Handles a SET_ADDRESS request.
+; The address is actually set in the IN status stage.
+_usb_set_address
+	ldfsr0	STR_SET_ADDRESS
+	call	uart_print_str
+	banksel	BANKED_EP0OUT_BUF
+	movfw	BANKED_EP0OUT_BUF+wValueL
+	call	uart_print_hex
+	call	uart_print_nl
+	banksel	USB_STATE			; address will be assigned in the status stage
+	bsf	USB_STATE,ADDRESS_PENDING
+	bsf	USB_STATE,EP0_HANDLED
 	goto	_usb_ctrl_complete
 
 
@@ -562,7 +588,7 @@ _usb_ctrl_out
 ; since we don't support any control writes with a data stage.
 ; All we have to do is re-arm the OUT endpoint.
 	banksel	BANKED_EP0OUT_STAT
-	movlw	_DAT0|_DTSEN|_BSTALL
+	movlw	_BSTALL
 	movwf	BANKED_EP0OUT_STAT
 	bsf	BANKED_EP0OUT_STAT,UOWN
 	return
@@ -590,19 +616,32 @@ _usb_ctrl_in
 ;	call	uart_print_nl
 ;
 ;	banksel	USB_STATE	; is this a control read or write?
-	btfsc	USB_STATE,LAST_EP0_WRITE
-	return			; if it's a write, nothing to do
+	btfsc	USB_STATE,IS_CONTROL_WRITE
+	goto	_check_for_pending_address
 ; fetch more data and re-arm the IN endpoint
 	call	ep0_read_in
-
-
-	banksel	BANKED_EP0IN_STAT
-
 	movlw	_DTSEN
 	btfss	BANKED_EP0IN_STAT,DTS
 	bsf	WREG,DTS	; toggle DTS
 	movwf	BANKED_EP0IN_STAT
 	bsf	BANKED_EP0IN_STAT,UOWN	; arm IN buffer
+	return
+; if this is the status stage of a Set Address request, assign the address here.
+; The OUT buffer has already been armed for the next SETUP.
+_check_for_pending_address
+	btfss	USB_STATE,ADDRESS_PENDING
+	return
+; read the address out of the setup packed in the OUT buffer
+	bcf	USB_STATE,ADDRESS_PENDING
+	movfw	BANKED_EP0OUT_BUF+wValueL
+	banksel	UADDR
+	movwf	UADDR
+	ldfsr0	STR_ADDRESS_WAS_SET
+	call	uart_print_str
+	banksel	UADDR
+	movfw	UADDR
+	call	uart_print_hex
+	call	uart_print_nl
 	return
 
 
@@ -865,6 +904,10 @@ STR_GET_DESCRIPTOR
 	dt	"GET_DESCRIPTOR\n\0"
 STR_UNHANDLED_DESCRIPTOR
 	dt	"unhandled descriptor \0"
+STR_SET_ADDRESS
+	dt	"received address \0"
+STR_ADDRESS_WAS_SET
+	dt	"assigned address \0"
 STR_STALL
 	dt	"sending STALL\n\0"
 STR_DONE
