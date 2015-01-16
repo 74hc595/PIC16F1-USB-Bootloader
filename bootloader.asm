@@ -338,6 +338,12 @@ _uidle	btfsc	UIR,IDLEIF
 ; error?
 	btfss	UIR,UERRIF
 	goto	_utrans
+	movfw	UEIR
+	call	uart_print_hex
+	banksel	UADDR
+	movfw	UADDR
+	call	uart_print_hex
+	banksel	UEIR
 	clrf	UEIR		; clear error flags
 	ldfsr0	STR_ERROR
 	call	uart_print_str
@@ -458,7 +464,7 @@ _cread	call	ep0_read_in		; read data into IN buffer
 	movlw	_DAT1|_DTSEN		; arm IN buffer
 	movwf	BANKED_EP0IN_STAT
 	bsf	BANKED_EP0IN_STAT,UOWN
-_armout	movlw	EP0_BUF_SIZE
+	movlw	EP0_BUF_SIZE
 	movwf	BANKED_EP0OUT_CNT
 	movlw	_DAT1|_DTSEN
 	movwf	BANKED_EP0OUT_STAT	; arm OUT buffer for status stage
@@ -467,11 +473,16 @@ _armout	movlw	EP0_BUF_SIZE
 
 ; this is a control write: prepare the IN endpoint for the status stage
 ; and the OUT endpoint for the next SETUP transaction
-_cwrite	movlw	_DAT1|_DTSEN
+_cwrite	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
+	movlw	_DAT1|_DTSEN
 	movwf	BANKED_EP0IN_STAT	; arm IN buffer for status stage
 	bsf	BANKED_EP0IN_STAT,UOWN
-	movlw	_BSTALL
-	goto	_armout
+	movlw	EP0_BUF_SIZE
+	movwf	BANKED_EP0OUT_CNT
+	movlw	_DAT0|_DTSEN|_BSTALL
+	movwf	BANKED_EP0OUT_STAT
+	bsf	BANKED_EP0OUT_STAT,UOWN
+	return
 
 ; Handles a GET_DESCRIPTOR request.
 ; BSR=0
@@ -502,14 +513,14 @@ _other_descriptor
 ; Handles a SET_ADDRESS request.
 ; The address is actually set in the IN status stage.
 _usb_set_address
-	ldfsr0	STR_SET_ADDRESS
-	call	uart_print_str
-	banksel	BANKED_EP0OUT_BUF
-	movfw	BANKED_EP0OUT_BUF+wValueL
-	call	uart_print_hex
-	call	uart_print_nl
-	banksel	USB_STATE			; address will be assigned in the status stage
-	bsf	USB_STATE,ADDRESS_PENDING
+	;ldfsr0	STR_SET_ADDRESS
+	;call	uart_print_str
+	;banksel	BANKED_EP0OUT_BUF
+	;movfw	BANKED_EP0OUT_BUF+wValueL
+	;call	uart_print_hex
+	;call	uart_print_nl
+	;banksel	USB_STATE			; address will be assigned in the status stage
+	bsf	USB_STATE,ADDRESS_PENDING	; address will be assigned in the status stage
 	bsf	USB_STATE,EP0_HANDLED
 	goto	_usb_ctrl_complete
 
@@ -530,6 +541,7 @@ _usb_ctrl_out
 	movlw	_DAT0|_DTSEN|_BSTALL
 	movwf	BANKED_EP0OUT_STAT
 	bsf	BANKED_EP0OUT_STAT,UOWN
+	return
 
 	if 0
 	banksel	BANKED_EP0OUT_STAT
@@ -603,8 +615,6 @@ _usb_ctrl_out
 	call	uart_print_hex
 	call	uart_print_nl
 	endif
-
-	return
 
 
 
