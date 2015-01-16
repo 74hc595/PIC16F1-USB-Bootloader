@@ -6,11 +6,13 @@
 ; FSR0L, FSR0H, FSR1L, and FSR1H are used to pass additional arguments
 ; to functions, and may be used as scratch registers inside of functions.
 
+
 	radix dec
+	list n=0,st=off
 	include "p16f1454.inc"
 	include "bdt.inc"
 	include "usb.inc"
-	list n=0,st=off
+	include "log_macros.inc"
 	errorlevel -302
 
 
@@ -142,7 +144,7 @@ decw	macro
 	addlw	255
 	endm
 
-	
+
 	
 ;;; Vectors
 	list
@@ -191,8 +193,7 @@ _wait_osc_ready
 	bsf	TXSTA,TXEN	; enable transmission
 
 ; Print a string
-	ldfsr0	STR_ON
-	call	uart_print_str
+	logch	'P',LOG_NEWLINE
 
 ; Initialize USB
 	call	usb_init
@@ -215,8 +216,7 @@ loop
 ;;; returns:	none
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_init
-	ldfsr0	STR_USB_INIT
-	call	uart_print_str
+	logch	'R',LOG_NEWLINE
 ; clear our state
 	banksel	USB_STATE
 	clrf	USB_STATE
@@ -292,8 +292,7 @@ _ret	return
 ;;; returns:	none
 ;;; clobbers:	W, BSR, FSR0
 usb_attach
-	ldfsr0	STR_USB_ATTACH
-	call	uart_print_str
+	logch	'A',0
 	banksel	UCON		; reset UCON
 	clrf	UCON
 	banksel	PIE2
@@ -303,8 +302,7 @@ usb_attach
 _usben	bsf	UCON,USBEN	; enable USB module and wait until ready
 	btfss	UCON,USBEN
 	goto	_usben
-	ldfsr0	STR_DONE
-	goto	uart_print_str
+	logch	'!',LOG_NEWLINE
 
 
 
@@ -329,10 +327,10 @@ _uidle	btfsc	UIR,IDLEIF
 ; error?
 	btfss	UIR,UERRIF
 	goto	_utrans
-	movfw	UEIR
-	call	uart_print_hex
-	ldfsr0	STR_ERROR
-	call	uart_print_str
+	logseq	'E'
+	loghex	1,LOG_NEWLINE
+	logf	UEIR
+	logend
 	banksel	UEIR
 	clrf	UEIR		; clear error flags
 ; service transactions
@@ -647,6 +645,7 @@ _bcdone	movfw	FSR0L
 
 
 
+	if 0
 ;;; Transmits a newline over the UART.
 ;;; arguments:	none
 ;;; returns:	none
@@ -743,7 +742,7 @@ uart_print_hex
 	movfw	FSR1H		; bring back original byte
 	w_to_hex_ascii
 	goto	uart_print_char
-
+	endif
 
 
 ;;; Descriptors
