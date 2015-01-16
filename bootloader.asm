@@ -354,10 +354,7 @@ _utrans	banksel	UIR
 	call	usb_service_ep0	; handle the control message
 	goto	_utrans
 ; clear USB interrupt
-_usdone	movlw	'_'
-	call	uart_print_char
-	call	uart_print_nl
-	banksel	PIR2
+_usdone	banksel	PIR2
 	bcf	PIR2,USBIF
 	return
 
@@ -368,14 +365,15 @@ _usdone	movlw	'_'
 ;;; returns:	none
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_service_ep0
-	movwf	FSR1H		; save status in a temp register
-	ldfsr0	STR_CTRL_EP0
-	call	uart_print_str
-	movfw	FSR1H
-	call	uart_print_hex
-	call	uart_print_nl
-	banksel	BANKED_EP0OUT
-	btfsc	FSR1H,DIR	; is it an IN transfer or an OUT/SETUP?
+;	movwf	FSR1H		; save status in a temp register
+;	ldfsr0	STR_CTRL_EP0
+;	call	uart_print_str
+;	movfw	FSR1H
+;	call	uart_print_hex
+;	call	uart_print_nl
+;	banksel	BANKED_EP0OUT
+	banksel	BANKED_EP0OUT_STAT
+	btfsc	WREG,DIR	; is it an IN transfer or an OUT/SETUP?
 	goto	_usb_ctrl_in
 ; it's an OUT or SETUP transfer
 	movfw	BANKED_EP0OUT_STAT
@@ -402,15 +400,14 @@ usb_ctrl_setup
 	movfw	BANKED_EP0OUT_BUF+bmRequestType
 	btfss	BANKED_EP0OUT_BUF+bmRequestType,7	; is this host->device?
 	bsf	USB_STATE,IS_CONTROL_WRITE		; if so, this is a control write
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	banksel	BANKED_EP0OUT_BUF
-	movfw	BANKED_EP0OUT_BUF+bRequest
-	call	uart_print_hex
-	call	uart_print_nl
-	banksel	BANKED_EP0OUT_BUF
-
+;	call	uart_print_hex
+;	movlw	' '
+;	call	uart_print_char
+;	banksel	BANKED_EP0OUT_BUF
+;	movfw	BANKED_EP0OUT_BUF+bRequest
+;	call	uart_print_hex
+;	call	uart_print_nl
+;	banksel	BANKED_EP0OUT_BUF
 	movlw	_REQ_TYPE
 	andwf	BANKED_EP0OUT_BUF+bmRequestType,w
 	bnz	_unhreq			; ignore non-standard requests
@@ -909,11 +906,11 @@ STR_ERROR
 STR_CTRL_EP0
 	dt	"servicing endpoint 0, USTAT=\0"
 STR_CTRL_SETUP
-	dt	"control SETUP\n\0"
+	dt	"S\n\0"
 STR_CTRL_OUT
-	dt	"control OUT\n\0"
+	dt	"O\n\0"
 STR_CTRL_IN
-	dt	"control IN\n\0"
+	dt	"I\n\0"
 STR_UNHANDLED_REQUEST
 	dt	"unhandled request \0"
 STR_GET_DESCRIPTOR
