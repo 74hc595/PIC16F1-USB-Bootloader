@@ -384,6 +384,32 @@ _usb_ctrl_setup
 	movlw	_REQ_TYPE
 	andwf	BANKED_EP0OUT_BUF+bmRequestType,w
 	bnz	_unhreq			; ignore non-standard requests
+; print packet
+	movfw	BANKED_EP0OUT_BUF+0
+	call	uart_print_hex
+	banksel	BANKED_EP0OUT_BUF
+	movfw	BANKED_EP0OUT_BUF+1
+	call	uart_print_hex
+	banksel	BANKED_EP0OUT_BUF
+	movfw	BANKED_EP0OUT_BUF+2
+	call	uart_print_hex
+	banksel	BANKED_EP0OUT_BUF
+	movfw	BANKED_EP0OUT_BUF+3
+	call	uart_print_hex
+	banksel	BANKED_EP0OUT_BUF
+	movfw	BANKED_EP0OUT_BUF+4
+	call	uart_print_hex
+	banksel	BANKED_EP0OUT_BUF
+	movfw	BANKED_EP0OUT_BUF+5
+	call	uart_print_hex
+	banksel	BANKED_EP0OUT_BUF
+	movfw	BANKED_EP0OUT_BUF+6
+	call	uart_print_hex
+	banksel	BANKED_EP0OUT_BUF
+	movfw	BANKED_EP0OUT_BUF+7
+	call	uart_print_hex
+	call	uart_print_nl
+	banksel	BANKED_EP0OUT_BUF
 ; check request number: is it GET_DESCRIPTOR?
 	movlw	GET_DESCRIPTOR
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
@@ -392,6 +418,10 @@ _usb_ctrl_setup
 	movlw	SET_ADDRESS
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
 	bz	_usb_set_address
+; is it SET_CONFIGURATION?
+	movlw	SET_CONFIG
+	subwf	BANKED_EP0OUT_BUF+bRequest,w
+	bz	_usb_set_configuration	; just sent ZLP
 ; unhandled request
 _unhreq	ldfsr0	STR_UNHANDLED_REQUEST
 	call	uart_print_str
@@ -451,28 +481,10 @@ _cwrite	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
 	bsf	BANKED_EP0OUT_STAT,UOWN
 	return
 
-; Handles a GET_DESCRIPTOR request.
+; Handles a Get Descriptor request.
 ; BSR=0
 _usb_get_descriptor
 	bsf	USB_STATE,EP0_HANDLED	; assume it'll be a valid request
-	movfw	BANKED_EP0OUT_BUF+0
-	call	uart_print_hex
-	movfw	BANKED_EP0OUT_BUF+1
-	call	uart_print_hex
-	movfw	BANKED_EP0OUT_BUF+2
-	call	uart_print_hex
-	movfw	BANKED_EP0OUT_BUF+3
-	call	uart_print_hex
-	movfw	BANKED_EP0OUT_BUF+4
-	call	uart_print_hex
-	movfw	BANKED_EP0OUT_BUF+5
-	call	uart_print_hex
-	movfw	BANKED_EP0OUT_BUF+6
-	call	uart_print_hex
-	movfw	BANKED_EP0OUT_BUF+7
-	call	uart_print_hex
-	call	uart_print_nl
-
 ;	movfw	BANKED_EP0OUT_BUF+wValueH
 ;	call	uart_print_hex
 	banksel	USB_STATE
@@ -514,14 +526,19 @@ _adjust_data_in_count
 	movwf	EP0_DATA_IN_COUNT
 	goto	_usb_ctrl_complete
 
-; Handles a SET_ADDRESS request.
+; Handles a Set Address request.
 ; The address is actually set in the IN status stage.
 _usb_set_address
 	bsf	USB_STATE,ADDRESS_PENDING	; address will be assigned in the status stage
 	bsf	USB_STATE,EP0_HANDLED
 	goto	_usb_ctrl_complete
 
-
+; Handles a Set Configuration request.
+; TODO: handle different configurations.
+; For now, just always accept the given value.
+_usb_set_configuration
+	bsf	USB_STATE,EP0_HANDLED
+	goto	_usb_ctrl_complete
 
 ; Handles an OUT control transfer on endpoint 0.
 ; BSR=0
