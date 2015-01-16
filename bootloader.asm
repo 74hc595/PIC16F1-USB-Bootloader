@@ -207,6 +207,9 @@ loop
 ;;; returns:	none
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_init
+	banksel	UEIR
+	movfw	UEIR
+	call	uart_print_hex
 	ldfsr0	STR_USB_INIT
 	call	uart_print_str
 ; clear our state
@@ -666,19 +669,19 @@ _check_for_pending_address
 ;;;		EP0_DATA_IN_COUNT decremented
 ;;; clobbers:	W, FSR0, FSR1
 ep0_read_in
-	movfw	EP0_DATA_IN_COUNT
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	banksel	EP0_DATA_IN_PTRH
-	movfw	EP0_DATA_IN_PTRH
-	call	uart_print_hex
-	banksel	EP0_DATA_IN_PTRL
-	movfw	EP0_DATA_IN_PTRL
-	call	uart_print_hex
-	call	uart_print_nl
+	;movfw	EP0_DATA_IN_COUNT
+	;call	uart_print_hex
+	;movlw	' '
+	;call	uart_print_char
+	;banksel	EP0_DATA_IN_PTRH
+	;movfw	EP0_DATA_IN_PTRH
+	;call	uart_print_hex
+	;banksel	EP0_DATA_IN_PTRL
+	;movfw	EP0_DATA_IN_PTRL
+	;call	uart_print_hex
+	;call	uart_print_nl
 
-	banksel	EP0_DATA_IN_COUNT
+	;banksel	EP0_DATA_IN_COUNT
 	clrf	BANKED_EP0IN_CNT	; initialize buffer size to 0
 	tstf	EP0_DATA_IN_COUNT	; do nothing if there are 0 bytes to send
 	retz
