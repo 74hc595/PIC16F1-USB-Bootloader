@@ -22,8 +22,13 @@
 
 ;;; Constants
 FOSC			equ	48000000
-BAUD		equ	38400
+BAUD			equ	38400
 BAUDVAL			equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
+
+NUM_CONFIGS		equ	1
+NUM_INTERFACES		equ	1
+NUM_ENDPOINTS		equ	0	; other than endpoint 0
+CONFIG_DESC_TOTAL_LEN	equ	CONFIG_DESC_LEN+(NUM_INTERFACES*INTF_DESC_LEN)+(NUM_ENDPOINTS*ENDPT_DESC_LEN)
 
 EP0_BUF_SIZE 		equ	8	; endpoint 0 buffer size
 RESERVED_RAM_SIZE	equ	4	; amount of RAM reserved by the bootloader
@@ -449,27 +454,64 @@ _cwrite	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
 ; Handles a GET_DESCRIPTOR request.
 ; BSR=0
 _usb_get_descriptor
-; check descriptor type: is it a device descriptor request?
+	bsf	USB_STATE,EP0_HANDLED	; assume it'll be a valid request
+	movfw	BANKED_EP0OUT_BUF+0
+	call	uart_print_hex
+	movfw	BANKED_EP0OUT_BUF+1
+	call	uart_print_hex
+	movfw	BANKED_EP0OUT_BUF+2
+	call	uart_print_hex
+	movfw	BANKED_EP0OUT_BUF+3
+	call	uart_print_hex
+	movfw	BANKED_EP0OUT_BUF+4
+	call	uart_print_hex
+	movfw	BANKED_EP0OUT_BUF+5
+	call	uart_print_hex
+	movfw	BANKED_EP0OUT_BUF+6
+	call	uart_print_hex
+	movfw	BANKED_EP0OUT_BUF+7
+	call	uart_print_hex
+	call	uart_print_nl
+
+;	movfw	BANKED_EP0OUT_BUF+wValueH
+;	call	uart_print_hex
+	banksel	USB_STATE
+; check descriptor type
 	movlw	DESC_DEVICE
 	subwf	BANKED_EP0OUT_BUF+wValueH,w
-	bnz	_other_descriptor
-	banksel	USB_STATE
+	bz	_device_descriptor
+	movlw	DESC_CONFIG
+	subwf	BANKED_EP0OUT_BUF+wValueH,w
+	bz	_config_descriptor
+; unsupported descriptor
+	bcf	USB_STATE,EP0_HANDLED
+	movfw	BANKED_EP0OUT_BUF+wValueH
+	call	uart_print_hex
+	ldfsr0	STR_UNHANDLED_DESCRIPTOR
+	call	uart_print_str
+	goto	_usb_ctrl_complete
+_device_descriptor
 	movlw	low DEVICE_DESCRIPTOR
 	movwf	EP0_DATA_IN_PTRL
 	movlw	high DEVICE_DESCRIPTOR
 	movwf	EP0_DATA_IN_PTRH
-	movlw	DESC_DEVICE_LEN
+	movlw	DEVICE_DESC_LEN
 	movwf	EP0_DATA_IN_COUNT
-	bsf	USB_STATE,EP0_HANDLED
-	goto	_usb_ctrl_complete
-
-_other_descriptor
-	ldfsr0	STR_UNHANDLED_DESCRIPTOR
-	call	uart_print_str
-	banksel	BANKED_EP0OUT_BUF
-	movfw	BANKED_EP0OUT_BUF+wValueH
-	call	uart_print_hex
-	call	uart_print_nl
+	goto	_adjust_data_in_count
+_config_descriptor
+	movlw	low CONFIGURATION_DESCRIPTOR
+	movwf	EP0_DATA_IN_PTRL
+	movlw	high CONFIGURATION_DESCRIPTOR
+	movwf	EP0_DATA_IN_PTRH
+	movlw	CONFIG_DESC_TOTAL_LEN	; length includes all subordinate descriptors
+	movwf	EP0_DATA_IN_COUNT
+; the count needs to be set to the minimum of the descriptor's length (in W)
+; and the requested length
+_adjust_data_in_count
+	subwf	BANKED_EP0OUT_BUF+wLengthL,w	; just ignore high byte...
+	bc	_usb_ctrl_complete		; if W <= f, no need to adjust
+	movfw	BANKED_EP0OUT_BUF+wLengthL
+	movwf	EP0_DATA_IN_COUNT
 	goto	_usb_ctrl_complete
 
 ; Handles a SET_ADDRESS request.
@@ -661,7 +703,7 @@ uart_print_hex
 
 ;;; Descriptors
 DEVICE_DESCRIPTOR
-	dt	0x12		; bLength
+	dt	DEVICE_DESC_LEN	; bLength
 	dt	0x01		; bDescriptorType
 	dt	0x00, 0x02	; bcdUSB USB 2.0
 	dt	0x00		; bDeviceClass
@@ -676,6 +718,27 @@ DEVICE_DESCRIPTOR
 	dt	0x00		; iSerialNumber (TODO)
 	dt	0x01		; bNumConfigurations
 
+CONFIGURATION_DESCRIPTOR
+	dt	CONFIG_DESC_LEN	; bLength
+	dt	0x02		; bDescriptorType
+	dt	low CONFIG_DESC_TOTAL_LEN	; wTotalLengthL
+	dt	high CONFIG_DESC_TOTAL_LEN	; wTotalLengthH
+	dt	0x01		; bNumInterfaces
+	dt	0x01		; bConfigurationValue
+	dt	0x00		; iConfiguration
+	dt	b'11000000'	; bmAttributes (self-powered)
+	dt	0x32		; bMaxPower (25 -> 50 mA)
+
+INTERFACE_DESCRIPTOR
+	dt	INTF_DESC_LEN	; bLength
+	dt	0x04		; bDescriptorType
+	dt	0x00		; bInterfaceNumber
+	dt	0x00		; bAlternateSetting
+	dt	0x00		; bNumEndpoints (TODO)
+	dt	0xFF		; bInterfaceClass (TODO)
+	dt	0x00		; bInterfaceSubclass
+	dt	0x00		; bInterfaceProtocol
+	dt	0x00		; iInterface
 
 ;;; Strings
 STR_ON
@@ -689,7 +752,7 @@ STR_ERROR
 STR_UNHANDLED_REQUEST
 	dt	"unhandled request \0"
 STR_UNHANDLED_DESCRIPTOR
-	dt	"unhandled descriptor \0"
+	dt	"!D\n\0"
 STR_ADDRESS_WAS_SET
 	dt	">A\n\0"
 STR_STALL

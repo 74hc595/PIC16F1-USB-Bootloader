@@ -60,4 +60,7 @@ DESC_INTF_PWR	equ	0x08
 DESC_OTG	equ	0x09
 
 ; Length of fixed-size descriptors
-DESC_DEVICE_LEN	equ	18
+DEVICE_DESC_LEN	equ	0x12
+CONFIG_DESC_LEN	equ	0x09
+INTF_DESC_LEN	equ	0x09
+ENDPT_DESC_LEN	equ	0x07
