@@ -207,9 +207,6 @@ loop
 ;;; returns:	none
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_init
-	banksel	UEIR
-	movfw	UEIR
-	call	uart_print_hex
 	ldfsr0	STR_USB_INIT
 	call	uart_print_str
 ; clear our state
@@ -309,20 +306,6 @@ _usben	bsf	UCON,USBEN	; enable USB module and wait until ready
 ;;; returns:	none
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_service
-;	ldfsr0	STR_UEIR
-;	call	uart_print_str
-;	banksel	UEIR
-;	movfw	UEIR
-;	call	uart_print_hex
-;	call	uart_print_str
-;	banksel	UIR
-;	movfw	UIR
-;	call	uart_print_hex
-;	call	uart_print_str
-;	banksel	UCON
-;	movfw	UCON
-;	call	uart_print_hex
-;	call	uart_print_nl
 	banksel	UIR
 ; reset?
 	btfss	UIR,URSTIF
@@ -340,13 +323,10 @@ _uidle	btfsc	UIR,IDLEIF
 	goto	_utrans
 	movfw	UEIR
 	call	uart_print_hex
-	banksel	UADDR
-	movfw	UADDR
-	call	uart_print_hex
-	banksel	UEIR
-	clrf	UEIR		; clear error flags
 	ldfsr0	STR_ERROR
 	call	uart_print_str
+	banksel	UEIR
+	clrf	UEIR		; clear error flags
 ; service transactions
 _utrans	banksel	UIR
 	btfss	UIR,TRNIF
@@ -369,15 +349,8 @@ _usdone	banksel	PIR2
 ;;; Handles a control transfer on endpoint 0.
 ;;; arguments:	USTAT value in W
 ;;; returns:	none
-;;; clobbers:	W, BSR, FSR0, FSR1H
+;;; clobbers:	W, BSR, FSR0
 usb_service_ep0
-;	movwf	FSR1H		; save status in a temp register
-;	ldfsr0	STR_CTRL_EP0
-;	call	uart_print_str
-;	movfw	FSR1H
-;	call	uart_print_hex
-;	call	uart_print_nl
-;	banksel	BANKED_EP0OUT
 	banksel	BANKED_EP0OUT_STAT
 	btfsc	WREG,DIR	; is it an IN transfer or an OUT/SETUP?
 	goto	_usb_ctrl_in
@@ -395,9 +368,6 @@ usb_service_ep0
 ;;; returns:	none
 ;;; clobbers:
 _usb_ctrl_setup
-	;ldfsr0	STR_CTRL_SETUP
-	;call	uart_print_str
-	;banksel	BANKED_EP0OUT_STAT
 ; ensure the OUT endpoint isn't armed
 	bcf	BANKED_EP0OUT_STAT,UOWN	; take ownership of EP0 OUT buffer
 	bcf	USB_STATE,EP0_IN_ALL_SENT
@@ -406,14 +376,6 @@ _usb_ctrl_setup
 	movfw	BANKED_EP0OUT_BUF+bmRequestType
 	btfss	BANKED_EP0OUT_BUF+bmRequestType,7	; is this host->device?
 	bsf	USB_STATE,IS_CONTROL_WRITE		; if so, this is a control write
-;	call	uart_print_hex
-;	movlw	' '
-;	call	uart_print_char
-;	banksel	BANKED_EP0OUT_BUF
-;	movfw	BANKED_EP0OUT_BUF+bRequest
-;	call	uart_print_hex
-;	call	uart_print_nl
-;	banksel	BANKED_EP0OUT_BUF
 	movlw	_REQ_TYPE
 	andwf	BANKED_EP0OUT_BUF+bmRequestType,w
 	bnz	_unhreq			; ignore non-standard requests
@@ -513,13 +475,6 @@ _other_descriptor
 ; Handles a SET_ADDRESS request.
 ; The address is actually set in the IN status stage.
 _usb_set_address
-	;ldfsr0	STR_SET_ADDRESS
-	;call	uart_print_str
-	;banksel	BANKED_EP0OUT_BUF
-	;movfw	BANKED_EP0OUT_BUF+wValueL
-	;call	uart_print_hex
-	;call	uart_print_nl
-	;banksel	USB_STATE			; address will be assigned in the status stage
 	bsf	USB_STATE,ADDRESS_PENDING	; address will be assigned in the status stage
 	bsf	USB_STATE,EP0_HANDLED
 	goto	_usb_ctrl_complete
@@ -529,13 +484,9 @@ _usb_set_address
 ; Handles an OUT control transfer on endpoint 0.
 ; BSR=0
 _usb_ctrl_out
-;	ldfsr0	STR_CTRL_OUT
-;	call	uart_print_str
-
 ; Only time this will get called is in the status stage of a control read,
 ; since we don't support any control writes with a data stage.
 ; All we have to do is re-arm the OUT endpoint.
-;	banksel	BANKED_EP0OUT_STAT
 	movlw	EP0_BUF_SIZE
 	movwf	BANKED_EP0OUT_CNT
 	movlw	_DAT0|_DTSEN|_BSTALL
@@ -543,109 +494,18 @@ _usb_ctrl_out
 	bsf	BANKED_EP0OUT_STAT,UOWN
 	return
 
-	if 0
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_STAT
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_CNT
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_ADRL
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_ADRH
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_BUF+0
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_BUF+1
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_BUF+2
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_BUF+3
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_BUF+4
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_BUF+5
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_BUF+6
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-
-	banksel	BANKED_EP0OUT_STAT
-	movfw	BANKED_EP0OUT_BUF+7
-	call	uart_print_hex
-	call	uart_print_nl
-	endif
-
 
 
 ; Handles an IN control transfer on endpoint 0.
 ; BSR=0
 _usb_ctrl_in
-;	ldfsr0	STR_CTRL_IN
-;	call	uart_print_str
-;	banksel	USB_STATE
-;
-;	banksel	EP0_DATA_IN_COUNT
-;	movfw	EP0_DATA_IN_COUNT
-;	call	uart_print_hex
-;	movlw	'i'
-;	call	uart_print_char
-;	banksel	EP0_DATA_IN_PTRH
-;	movfw	EP0_DATA_IN_PTRH
-;	call	uart_print_hex
-;	banksel	EP0_DATA_IN_PTRL
-;	movfw	EP0_DATA_IN_PTRL
-;	call	uart_print_hex
-;	call	uart_print_nl
-;
-;	banksel	USB_STATE	; is this a control read or write?
-	btfsc	USB_STATE,IS_CONTROL_WRITE
+	btfsc	USB_STATE,IS_CONTROL_WRITE	; is this a control read or write?
 	goto	_check_for_pending_address
 ; fetch more data and re-arm the IN endpoint
 	call	ep0_read_in
 	movlw	_DTSEN
-	btfss	BANKED_EP0IN_STAT,DTS
-	bsf	WREG,DTS	; toggle DTS
+	btfss	BANKED_EP0IN_STAT,DTS	; toggle DTS
+	bsf	WREG,DTS
 	movwf	BANKED_EP0IN_STAT
 	bsf	BANKED_EP0IN_STAT,UOWN	; arm IN buffer
 	return
@@ -659,12 +519,9 @@ _check_for_pending_address
 	movfw	BANKED_EP0OUT_BUF+wValueL
 	banksel	UADDR
 	movwf	UADDR
+	call	uart_print_hex
 	ldfsr0	STR_ADDRESS_WAS_SET
 	call	uart_print_str
-	banksel	UADDR
-	movfw	UADDR
-	call	uart_print_hex
-	call	uart_print_nl
 	return
 
 
@@ -676,19 +533,6 @@ _check_for_pending_address
 ;;;		EP0_DATA_IN_COUNT decremented
 ;;; clobbers:	W, FSR0, FSR1
 ep0_read_in
-	;movfw	EP0_DATA_IN_COUNT
-	;call	uart_print_hex
-	;movlw	' '
-	;call	uart_print_char
-	;banksel	EP0_DATA_IN_PTRH
-	;movfw	EP0_DATA_IN_PTRH
-	;call	uart_print_hex
-	;banksel	EP0_DATA_IN_PTRL
-	;movfw	EP0_DATA_IN_PTRL
-	;call	uart_print_hex
-	;call	uart_print_nl
-
-	;banksel	EP0_DATA_IN_COUNT
 	clrf	BANKED_EP0IN_CNT	; initialize buffer size to 0
 	tstf	EP0_DATA_IN_COUNT	; do nothing if there are 0 bytes to send
 	retz
@@ -712,73 +556,8 @@ _bcdone	movfw	FSR0L
 	movwf	EP0_DATA_IN_PTRL
 	movfw	FSR0H
 	movwf	EP0_DATA_IN_PTRH
-	if 0
-	banksel	BANKED_EP0IN_STAT
-	movfw	BANKED_EP0IN_STAT
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0IN_STAT
-	movfw	BANKED_EP0IN_CNT
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0IN_STAT
-	movfw	BANKED_EP0IN_ADRL
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	banksel	BANKED_EP0IN_STAT
-	movfw	BANKED_EP0IN_ADRH
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-
-	ldfsr0d	EP0IN_BUF
-	moviw	FSR0++
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	moviw	FSR0++
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	moviw	FSR0++
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	moviw	FSR0++
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	moviw	FSR0++
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	moviw	FSR0++
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-	
-	moviw	FSR0++
-	call	uart_print_hex
-	movlw	' '
-	call	uart_print_char
-
-	moviw	FSR0++
-	call	uart_print_hex
-	call	uart_print_nl
-	banksel	BANKED_EP0IN_STAT
-	endif
 	return
+
 
 
 ;;; Transmits a newline over the UART.
@@ -905,34 +684,16 @@ STR_USB_INIT
 	dt	"USB init\n\0"
 STR_USB_ATTACH
 	dt	"USB attach...\0"
-STR_UEIR
-	dt	"UEIR=\0"
-STR_UIR
-	dt	" UIR=\0"
-STR_UCON
-	dt	" UCON=\0"
 STR_ERROR
-	dt	"error\n\0"
-STR_CTRL_EP0
-	dt	"servicing endpoint 0, USTAT=\0"
-STR_CTRL_SETUP
-	dt	"S\n\0"
-STR_CTRL_OUT
-	dt	"O\n\0"
-STR_CTRL_IN
-	dt	"I\n\0"
+	dt	"!E\n\0"
 STR_UNHANDLED_REQUEST
 	dt	"unhandled request \0"
-STR_GET_DESCRIPTOR
-	dt	"GET_DESCRIPTOR\n\0"
 STR_UNHANDLED_DESCRIPTOR
 	dt	"unhandled descriptor \0"
-STR_SET_ADDRESS
-	dt	"received address \0"
 STR_ADDRESS_WAS_SET
-	dt	"assigned address \0"
+	dt	">A\n\0"
 STR_STALL
-	dt	"sending STALL\n\0"
+	dt	"STALL\n\0"
 STR_DONE
 	dt	"done\n\0"
 	end	
