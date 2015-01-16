@@ -309,20 +309,20 @@ _usben	bsf	UCON,USBEN	; enable USB module and wait until ready
 ;;; returns:	none
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_service
-	ldfsr0	STR_UEIR
-	call	uart_print_str
-	banksel	UEIR
-	movfw	UEIR
-	call	uart_print_hex
-	call	uart_print_str
-	banksel	UIR
-	movfw	UIR
-	call	uart_print_hex
-	call	uart_print_str
-	banksel	UCON
-	movfw	UCON
-	call	uart_print_hex
-	call	uart_print_nl
+;	ldfsr0	STR_UEIR
+;	call	uart_print_str
+;	banksel	UEIR
+;	movfw	UEIR
+;	call	uart_print_hex
+;	call	uart_print_str
+;	banksel	UIR
+;	movfw	UIR
+;	call	uart_print_hex
+;	call	uart_print_str
+;	banksel	UCON
+;	movfw	UCON
+;	call	uart_print_hex
+;	call	uart_print_nl
 	banksel	UIR
 ; reset?
 	btfss	UIR,URSTIF
