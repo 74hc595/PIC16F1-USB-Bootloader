@@ -31,7 +31,7 @@ NUM_ENDPOINTS		equ	0	; other than endpoint 0
 CONFIG_DESC_TOTAL_LEN	equ	CONFIG_DESC_LEN+(NUM_INTERFACES*INTF_DESC_LEN)+(NUM_ENDPOINTS*ENDPT_DESC_LEN)
 
 EP0_BUF_SIZE 		equ	8	; endpoint 0 buffer size
-RESERVED_RAM_SIZE	equ	4	; amount of RAM reserved by the bootloader
+RESERVED_RAM_SIZE	equ	5	; amount of RAM reserved by the bootloader
 EP0OUT_BUF		equ	BUF_START+RESERVED_RAM_SIZE
 EP0IN_BUF		equ	EP0OUT_BUF+EP0_BUF_SIZE
 BANKED_EP0OUT_BUF	equ	BANKED_BUF_START+RESERVED_RAM_SIZE
@@ -45,13 +45,16 @@ USB_STATE		equ	RESERVED_RAM+0
 EP0_DATA_IN_PTRL	equ	RESERVED_RAM+1	; pointer to block of data to be sent
 EP0_DATA_IN_PTRH	equ	RESERVED_RAM+2	;   in the current EP0 IN transaction
 EP0_DATA_IN_COUNT	equ	RESERVED_RAM+3	; remaining bytes to be sent
+GET_CONFIG_BUF		equ	RESERVED_RAM+4	; response buffer for Get Configuration
+
+LINEAR_GET_CONFIG_BUF	equ	0x2000+(GET_CONFIG_BUF-0x20)
 
 ; USB_STATE bit flags
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
 EP0_HANDLED		equ	1	; last endpoint 0 transaction was handled; will stall if 0
 ADDRESS_PENDING		equ	2	; need to set address in next IN transaction
 EP0_IN_ALL_SENT		equ	3	; all data packets for EP0 IN transaction have been sent
-
+DEVICE_CONFIGURED	equ	4	; the device is configured
 
 ;;; Macros
 	nolist
@@ -410,18 +413,22 @@ _usb_ctrl_setup
 	call	uart_print_hex
 	call	uart_print_nl
 	banksel	BANKED_EP0OUT_BUF
-; check request number: is it GET_DESCRIPTOR?
+; check request number: is it Get Descriptor?
 	movlw	GET_DESCRIPTOR
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
 	bz	_usb_get_descriptor
-; is it SET_ADDRESS?
+; is it Set Address?
 	movlw	SET_ADDRESS
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
 	bz	_usb_set_address
-; is it SET_CONFIGURATION?
+; is it Set_Configuration?
 	movlw	SET_CONFIG
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
-	bz	_usb_set_configuration	; just sent ZLP
+	bz	_usb_set_configuration
+; is it Get Configuration?
+	movlw	GET_CONFIG
+	subwf	BANKED_EP0OUT_BUF+bRequest,w
+	bz	_usb_get_configuration
 ; unhandled request
 _unhreq	ldfsr0	STR_UNHANDLED_REQUEST
 	call	uart_print_str
@@ -534,9 +541,30 @@ _usb_set_address
 	goto	_usb_ctrl_complete
 
 ; Handles a Set Configuration request.
-; TODO: handle different configurations.
-; For now, just always accept the given value.
+; For now just accept any nonzero configuration.
+; BSR=0
 _usb_set_configuration
+	bcf	USB_STATE,DEVICE_CONFIGURED	; temporarily clear flag
+	tstf	BANKED_EP0OUT_BUF+wValueL	; anything other than 0 is valid
+	skpz
+	bsf	USB_STATE,DEVICE_CONFIGURED
+	bsf	USB_STATE,EP0_HANDLED
+	goto	_usb_ctrl_complete
+
+; Handles a Get Configuration request.
+; BSR=0
+_usb_get_configuration
+; Put either 0 or 1 into GET_CONFIG_BUF
+	clrw
+	btfsc	USB_STATE,DEVICE_CONFIGURED
+	incf	GET_CONFIG_BUF,f
+; Seems like overkill for a 1-byte transfer, but it keeps things consistent
+	movlw	low LINEAR_GET_CONFIG_BUF
+	movwf	EP0_DATA_IN_PTRL
+	movlw	high LINEAR_GET_CONFIG_BUF
+	movwf	EP0_DATA_IN_PTRH
+	movlw	1
+	movwf	EP0_DATA_IN_COUNT
 	bsf	USB_STATE,EP0_HANDLED
 	goto	_usb_ctrl_complete
 
@@ -744,7 +772,7 @@ CONFIGURATION_DESCRIPTOR
 	dt	0x01		; bConfigurationValue
 	dt	0x00		; iConfiguration
 	dt	b'11000000'	; bmAttributes (self-powered)
-	dt	0x32		; bMaxPower (25 -> 50 mA)
+	dt	0x19		; bMaxPower (25 -> 50 mA)
 
 INTERFACE_DESCRIPTOR
 	dt	INTF_DESC_LEN	; bLength
