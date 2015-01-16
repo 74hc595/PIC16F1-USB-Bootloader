@@ -388,30 +388,30 @@ _usb_ctrl_setup
 	andwf	BANKED_EP0OUT_BUF+bmRequestType,w
 	bnz	_unhreq			; ignore non-standard requests
 ; print packet
-	movfw	BANKED_EP0OUT_BUF+0
-	call	uart_print_hex
-	banksel	BANKED_EP0OUT_BUF
-	movfw	BANKED_EP0OUT_BUF+1
-	call	uart_print_hex
-	banksel	BANKED_EP0OUT_BUF
-	movfw	BANKED_EP0OUT_BUF+2
-	call	uart_print_hex
-	banksel	BANKED_EP0OUT_BUF
-	movfw	BANKED_EP0OUT_BUF+3
-	call	uart_print_hex
-	banksel	BANKED_EP0OUT_BUF
-	movfw	BANKED_EP0OUT_BUF+4
-	call	uart_print_hex
-	banksel	BANKED_EP0OUT_BUF
-	movfw	BANKED_EP0OUT_BUF+5
-	call	uart_print_hex
-	banksel	BANKED_EP0OUT_BUF
-	movfw	BANKED_EP0OUT_BUF+6
-	call	uart_print_hex
-	banksel	BANKED_EP0OUT_BUF
-	movfw	BANKED_EP0OUT_BUF+7
-	call	uart_print_hex
-	call	uart_print_nl
+;	movfw	BANKED_EP0OUT_BUF+0
+;	call	uart_print_hex
+;	banksel	BANKED_EP0OUT_BUF
+;	movfw	BANKED_EP0OUT_BUF+1
+;	call	uart_print_hex
+;	banksel	BANKED_EP0OUT_BUF
+;	movfw	BANKED_EP0OUT_BUF+2
+;	call	uart_print_hex
+;	banksel	BANKED_EP0OUT_BUF
+;	movfw	BANKED_EP0OUT_BUF+3
+;	call	uart_print_hex
+;	banksel	BANKED_EP0OUT_BUF
+;	movfw	BANKED_EP0OUT_BUF+4
+;	call	uart_print_hex
+;	banksel	BANKED_EP0OUT_BUF
+;	movfw	BANKED_EP0OUT_BUF+5
+;	call	uart_print_hex
+;	banksel	BANKED_EP0OUT_BUF
+;	movfw	BANKED_EP0OUT_BUF+6
+;	call	uart_print_hex
+;	banksel	BANKED_EP0OUT_BUF
+;	movfw	BANKED_EP0OUT_BUF+7
+;	call	uart_print_hex
+;	call	uart_print_nl
 	banksel	BANKED_EP0OUT_BUF
 ; check request number: is it Get Descriptor?
 	movlw	GET_DESCRIPTOR
