@@ -2,7 +2,7 @@
 ;
 ; Logging macros
 
-LOGGING_ENABLED	equ	0
+LOGGING_ENABLED	equ	1
 
 
 ; Begins a hex byte sequence; the lower 5 bits specify how many of the
@@ -10,7 +10,7 @@ LOGGING_ENABLED	equ	0
 LOG_HEX		equ	b'10000000'
 ; The given character or hex byte sequence should be followed by a newline.
 LOG_NEWLINE	equ	b'01000000'
-; The current hex byte sequence should print a space after each byte.
+; The current hex byte sequence should print a space before each byte.
 LOG_DELIM	equ	LOG_HEX|b'00100000'
 
 
@@ -56,10 +56,11 @@ logl	macro	x
 	endm
 
 ; Logs the byte in the given file register as part of a multi-character logging sequence.
-; The byte is copied to W.
+; The appropriate bank is selected and the byte is copied to W.
 ; Must be called between logseq/logend.
 logf	macro	x
 	if	LOGGING_ENABLED
+	banksel	x
 	movfw	x
 	call	log_byte
 	endif

@@ -386,6 +386,17 @@ _usb_ctrl_setup
 	andwf	BANKED_EP0OUT_BUF+bmRequestType,w
 	bnz	_unhreq			; ignore non-standard requests
 ; print packet
+	logseq	'P'
+	loghex	8,LOG_NEWLINE|LOG_DELIM
+	logf	BANKED_EP0OUT_BUF+0
+	logf	BANKED_EP0OUT_BUF+1
+	logf	BANKED_EP0OUT_BUF+2
+	logf	BANKED_EP0OUT_BUF+3
+	logf	BANKED_EP0OUT_BUF+4
+	logf	BANKED_EP0OUT_BUF+5
+	logf	BANKED_EP0OUT_BUF+6
+	logf	BANKED_EP0OUT_BUF+7
+	logend
 ;	movfw	BANKED_EP0OUT_BUF+0
 ;	call	uart_print_hex
 ;	banksel	BANKED_EP0OUT_BUF
@@ -428,12 +439,11 @@ _usb_ctrl_setup
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
 	bz	_usb_get_configuration
 ; unhandled request
-_unhreq	ldfsr0	STR_UNHANDLED_REQUEST
-	call	uart_print_str
-	banksel	BANKED_EP0OUT_BUF
-	movfw	BANKED_EP0OUT_BUF+bRequest
-	call	uart_print_hex
-	call	uart_print_nl
+_unhreq	logseq	'?'
+	logl	'R'
+	loghex	1,LOG_NEWLINE
+	logf	BANKED_EP0OUT_BUF+bRequest
+	logend
 
 ; Finishes a SETUP transaction.
 _usb_ctrl_complete
@@ -443,8 +453,7 @@ _usb_ctrl_complete
 	banksel	USB_STATE
 	btfsc	USB_STATE,EP0_HANDLED
 	goto	_cvalid
-	ldfsr0	STR_STALL
-	call	uart_print_str
+	logch	'X',LOG_NEWLINE
 	banksel	BANKED_EP0IN
 	movlw	_DAT0|_DTSEN|_BSTALL
 	movwf	BANKED_EP0IN_STAT	; stall the EP0 IN endpoint
@@ -490,9 +499,6 @@ _cwrite	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
 ; BSR=0
 _usb_get_descriptor
 	bsf	USB_STATE,EP0_HANDLED	; assume it'll be a valid request
-;	movfw	BANKED_EP0OUT_BUF+wValueH
-;	call	uart_print_hex
-	banksel	USB_STATE
 ; check descriptor type
 	movlw	DESC_DEVICE
 	subwf	BANKED_EP0OUT_BUF+wValueH,w
@@ -502,10 +508,12 @@ _usb_get_descriptor
 	bz	_config_descriptor
 ; unsupported descriptor
 	bcf	USB_STATE,EP0_HANDLED
-	movfw	BANKED_EP0OUT_BUF+wValueH
-	call	uart_print_hex
-	ldfsr0	STR_UNHANDLED_DESCRIPTOR
-	call	uart_print_str
+	logseq	'?'
+	logl	'D'
+	loghex	1,LOG_NEWLINE
+	logf	BANKED_EP0OUT_BUF+wValueH
+	logend
+	banksel	BANKED_EP0OUT_BUF
 	goto	_usb_ctrl_complete
 _device_descriptor
 	movlw	low DEVICE_DESCRIPTOR
@@ -604,9 +612,10 @@ _check_for_pending_address
 	movfw	BANKED_EP0OUT_BUF+wValueL
 	banksel	UADDR
 	movwf	UADDR
-	call	uart_print_hex
-	ldfsr0	STR_ADDRESS_WAS_SET
-	call	uart_print_str
+	logseq	'A'
+	loghex	1,LOG_NEWLINE
+	logf	UADDR
+	logend
 	return
 
 
@@ -643,6 +652,15 @@ _bcdone	movfw	FSR0L
 	movwf	EP0_DATA_IN_PTRH
 	return
 
+
+log_single_byte
+	return
+log_multi_byte_start
+	return
+log_byte
+	return
+log_multi_byte_end
+	return
 
 
 	if 0
@@ -784,23 +802,4 @@ INTERFACE_DESCRIPTOR
 	dt	0x00		; bInterfaceProtocol
 	dt	0x00		; iInterface
 
-;;; Strings
-STR_ON
-	dt	"Power on\n\0"
-STR_USB_INIT
-	dt	"USB init\n\0"
-STR_USB_ATTACH
-	dt	"USB attach...\0"
-STR_ERROR
-	dt	"!E\n\0"
-STR_UNHANDLED_REQUEST
-	dt	"unhandled request \0"
-STR_UNHANDLED_DESCRIPTOR
-	dt	"!D\n\0"
-STR_ADDRESS_WAS_SET
-	dt	">A\n\0"
-STR_STALL
-	dt	"STALL\n\0"
-STR_DONE
-	dt	"done\n\0"
 	end	
