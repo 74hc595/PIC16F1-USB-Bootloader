@@ -388,10 +388,10 @@ usb_service_ep0
 ;;; arguments:	BSR=0
 ;;; returns:	none
 ;;; clobbers:
-usb_ctrl_setup
-	ldfsr0	STR_CTRL_SETUP
-	call	uart_print_str
-	banksel	BANKED_EP0OUT_STAT
+_usb_ctrl_setup
+	;ldfsr0	STR_CTRL_SETUP
+	;call	uart_print_str
+	;banksel	BANKED_EP0OUT_STAT
 ; ensure the OUT endpoint isn't armed
 	bcf	BANKED_EP0OUT_STAT,UOWN	; take ownership of EP0 OUT buffer
 	bcf	USB_STATE,EP0_IN_ALL_SENT
@@ -518,13 +518,13 @@ _usb_set_address
 ; Handles an OUT control transfer on endpoint 0.
 ; BSR=0
 _usb_ctrl_out
-	ldfsr0	STR_CTRL_OUT
-	call	uart_print_str
+;	ldfsr0	STR_CTRL_OUT
+;	call	uart_print_str
 
 ; Only time this will get called is in the status stage of a control read,
 ; since we don't support any control writes with a data stage.
 ; All we have to do is re-arm the OUT endpoint.
-	banksel	BANKED_EP0OUT_STAT
+;	banksel	BANKED_EP0OUT_STAT
 	movlw	EP0_BUF_SIZE
 	movwf	BANKED_EP0OUT_CNT
 	movlw	_DAT0|_DTSEN|_BSTALL
@@ -611,9 +611,9 @@ _usb_ctrl_out
 ; Handles an IN control transfer on endpoint 0.
 ; BSR=0
 _usb_ctrl_in
-	ldfsr0	STR_CTRL_IN
-	call	uart_print_str
-	banksel	USB_STATE
+;	ldfsr0	STR_CTRL_IN
+;	call	uart_print_str
+;	banksel	USB_STATE
 ;
 ;	banksel	EP0_DATA_IN_COUNT
 ;	movfw	EP0_DATA_IN_COUNT
