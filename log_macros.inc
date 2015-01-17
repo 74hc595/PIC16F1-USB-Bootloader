@@ -11,7 +11,7 @@ LOG_HEX		equ	b'10000000'
 ; The given character or hex byte sequence should be followed by a newline.
 LOG_NEWLINE	equ	b'01000000'
 ; The current hex byte sequence should print a space before each byte.
-LOG_DELIM	equ	LOG_HEX|b'00100000'
+LOG_SPACE	equ	b'00100000'
 
 
 ; Logs a single 6-bit character.
@@ -23,6 +23,7 @@ logch	macro	ch,opts
 	endm
 
 ; Begins a multi-character logging sequence.
+; Saves FSR0; restore it with logend.
 logseq	macro	x
 	if	LOGGING_ENABLED
 	movlw	x
@@ -47,7 +48,7 @@ loghex	macro	count,opts
 	endm
 
 ; Logs the given literal as part of a multi-character logging sequence.
-; Must be called between logseq/logend.
+; Must be called between logseq/logend, or FSR0 will be clobbered.
 logl	macro	x
 	if	LOGGING_ENABLED
 	movlw	x
@@ -57,7 +58,7 @@ logl	macro	x
 
 ; Logs the byte in the given file register as part of a multi-character logging sequence.
 ; The appropriate bank is selected and the byte is copied to W.
-; Must be called between logseq/logend.
+; Must be called between logseq/logend, or FSR0 will be clobbered.
 logf	macro	x
 	if	LOGGING_ENABLED
 	banksel	x
@@ -67,6 +68,7 @@ logf	macro	x
 	endm
 
 ; Ends a multi-character logging sequence.
+; Restores FSR0 to the value it had when logseq was called.
 logend	macro
 	if	LOGGING_ENABLED
 	call	log_multi_byte_end

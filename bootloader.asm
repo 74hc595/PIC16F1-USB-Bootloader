@@ -206,7 +206,8 @@ loop
 	banksel	LATA
 	movlw	(1<<LATA4)
 	xorwf	LATA,f
-; Perform USB tasks
+; Print any pending characters in the log
+	call	log_service
 	goto	loop
 
 
@@ -387,7 +388,7 @@ _usb_ctrl_setup
 	bnz	_unhreq			; ignore non-standard requests
 ; print packet
 	logseq	'P'
-	loghex	8,LOG_NEWLINE|LOG_DELIM
+	loghex	8,LOG_NEWLINE|LOG_SPACE
 	logf	BANKED_EP0OUT_BUF+0
 	logf	BANKED_EP0OUT_BUF+1
 	logf	BANKED_EP0OUT_BUF+2
@@ -661,20 +662,74 @@ LOG_BUFFER	equ	0x2300
 
 ; Banked RAM locations used by logging system
 ; (directly before the log buffer)
-LOG_WREG_SAVE	equ	0x53b		; bank 0x0A
-LOG_FSR0L_SAVE	equ	0x53c
-LOG_FSR0H_SAVE	equ	0x53d
-LOG_HEAD	equ	0x53e
-LOG_TAIL	equ	0x53f
+LOG_WREG_SAVE	equ	0x539		; bank 0x0A
+LOG_FSR0L_SAVE	equ	0x53a
+LOG_FSR0H_SAVE	equ	0x53b
+LOG_HEAD	equ	0x53c
+LOG_TAIL	equ	0x53d
+LOG_FMT_FLAGS	equ	0x53e		; hex count/newline/space flags
+LOG_CURR_BYTE	equ	0x53f
 
 log_init
 	banksel	LOG_HEAD
 	clrf	LOG_HEAD
 	clrf	LOG_TAIL
+	clrf	LOG_FMT_FLAGS
 	return
 
 log_service
+	banksel	LOG_HEAD
+_lsloop	movfw	LOG_TAIL	; if head == tail, buffer is empty
+	subwf	LOG_HEAD,w
+	skpnz
 	return
+; dequeue a byte
+	movlw	LOG_BUFFER>>8
+	movwf	FSR0H
+	movfw	LOG_TAIL
+	movwf	FSR0L
+	moviw	FSR0++
+	movwf	LOG_CURR_BYTE
+; save advanced head pointer
+	movfw	FSR0L
+	movwf	LOG_HEAD
+; process the byte
+	btfsc	LOG_CURR_BYTE,7	; is this a hex marker?
+	goto	_lsshex
+; are we in hex mode?
+	btfsc	LOG_FMT_FLAGS,7
+	goto	_lsphex
+; we're just in ASCII mode
+	movfw	LOG_CURR_BYTE
+	andlw	b'00111111'	; mask off high bytes
+	call	_uart_print_ch
+	btfsc	LOG_FMT_FLAGS,6	; need to print a trailing newline?
+	call	_uart_print_nl
+	goto	_lsloop
+_lsshex	movfw	LOG_CURR_BYTE	; starting hex mode? write flags and loop
+	movwf	LOG_FMT_FLAGS
+	goto	_lsloop	
+_lsphex	btfsc	LOG_FMT_FLAGS,5	; need to print a leading space?
+	call	_uart_print_space
+	call	_uart_print_hex	; prints byte in LOG_CURR_BYTE
+	movwf	LOG_FMT_FLAGS	; decrement hex byte count
+	andlw	b'00011111'	; isolate count bits
+	decfsz	WREG,w		; subtract 1
+	goto	_nxthex
+; hex counter reached 0; print newline if needed and clear format flags
+	btfsc	LOG_FMT_FLAGS,6	; need to print a trailing newline?
+	call	_uart_print_nl
+	clrf	LOG_FMT_FLAGS
+	goto	_lsloop
+; hex counter > 0; write back new count
+_nxthex	xorwf	LOG_FMT_FLAGS,w	; xor-swap new count and old flags
+	xorwf	LOG_FMT_FLAGS,f
+	xorwf	LOG_FMT_FLAGS,w	; LOG_FMT_FLAGS contains new count, but NOT old flags
+	andlw	b'11100000'	; isolate old flags
+	iorwf	LOG_FMT_FLAGS,f	; write them back to LOG_FMT_FLAGS
+	goto	_lsloop
+	
+
 
 log_single_byte
 	banksel	LOG_WREG_SAVE	; need to save W and FSR0
@@ -713,7 +768,7 @@ _log_byte_inner
 	movfw	LOG_TAIL
 	movwf	FSR0L
 	movfw	LOG_WREG_SAVE	; write byte into log buffer
-	moviw	FSR0++		; advance tail pointer
+	movwi	FSR0++		; advance tail pointer
 ; save new tail pointer
 	movfw	FSR0L		; high byte is ignored for 256-byte wraparound
 	movwf	LOG_TAIL
@@ -722,6 +777,40 @@ _log_byte_inner
 	skpnz
 	incf	LOG_HEAD,f
 	return
+
+
+_uart_print_space
+	movlw	' '
+	goto	_uart_print_ch
+_uart_print_nl
+	movlw	'\n'
+; prints char in W
+_uart_print_ch
+	banksel	TXREG
+	movwf	TXREG		; transmit the character
+	banksel	PIR1		; need 1 cycle delay before checking TXIF
+	waitfs	PIR1,TXIF	; loop until character is sent
+	banksel	LOG_FMT_FLAGS	; preserve BSR
+	return
+
+
+
+;;; Converts the lower nibble of W to its ASCII hexadecimal representation.
+_w2hd	macro			; 'w to hex digit'
+	andlw	b'00001111'
+	subwl	10		; is W >= 10?
+	skpnc
+	addlw	7		; if so, shift to letters
+	addlw	'A'-7		; shift to printable ASCII
+	endm
+_uart_print_hex
+	movfw	LOG_CURR_BYTE
+	swapf	WREG,w		; get high nibble
+	_w2hd
+	call	_uart_print_ch	; print high nibble
+	movfw	LOG_CURR_BYTE	; bring back original byte
+	_w2hd
+	goto	_uart_print_ch	; print low nibble
 
 
 
@@ -785,44 +874,11 @@ _l1	bsf	PMCON1,RD	; initiate read
 	skpnc
 	incf	PMADRH,f
 	goto	_l1
-
-
-
-;;; Converts the lower nibble of W to its ASCII hexadecimal representation.
-w_to_hex_ascii macro
-	andlw	b'00001111'
-	subwl	10		; is W >= 10?
-	skpnc
-	addlw	7		; if so, shift to letters
-	addlw	'A'-7		; shift to printable ASCII
-	endm
-
-
-
-;;; Prints a 16-bit word over the UART.
-;;; arguments:	msb in W
-;;;		lsb in FSR0L
-;;; returns:	none
-;;; clobbers:	W, BSR, FSR1H
-uart_print_hex16
-	call	uart_print_hex	; print W (msb)
-	movfw	FSR0L		; fall through and print lsb
-
-
-
-;;; Transmits a hexadecimal byte over the UART.
-;;; arguments:	byte in W
-;;; returns:	none
-;;; clobbers:	W, BSR, FSR1H
-uart_print_hex
-	movwf	FSR1H		; save byte
-	swapf	WREG,w		; get high nibble
-	w_to_hex_ascii
-	call	uart_print_char	; print high nibble
-	movfw	FSR1H		; bring back original byte
-	w_to_hex_ascii
-	goto	uart_print_char
 	endif
+
+
+
+
 
 
 ;;; Descriptors
