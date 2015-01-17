@@ -1,9 +1,6 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
-; Logging macros
-
-LOGGING_ENABLED	equ	1
-
+; Macros for log.asm
 
 ; Begins a hex byte sequence; the lower 5 bits specify how many of the
 ; following bytes should be printed in hexadecimal.
@@ -32,9 +29,9 @@ loghex	macro	count,opts
 
 ; Logs a literal by first copying it to W.
 ; This will *not* work properly for ASCII characters.
-logl	macro
+logl	macro	x
 	if	LOGGING_ENABLED
-	movfw
+	movlw	x
 	call	log_single_byte
 	endif
 	endm
@@ -90,9 +87,9 @@ mloghex	macro	count,opts
 ; The literal is copied to W.
 ; This will *not* work properly for ASCII characters.
 ; Must be called between mlog/logend. or FSR0 will be clobbered.
-mlogl	macro
+mlogl	macro	x
 	if	LOGGING_ENABLED
-	movfw
+	movlw	x
 	call	log_single_byte
 	endif
 	endm
