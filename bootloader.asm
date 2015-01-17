@@ -223,6 +223,9 @@ loop
 	xorwf	LATA,f
 ; Print any pending characters in the log
 	call	log_service
+	mloghex	1,LOG_NEWLINE
+	mlogf	0x7F
+	incf	0x7F,f
 	goto	loop
 
 
