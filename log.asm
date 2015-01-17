@@ -2,7 +2,6 @@
 ;
 ; Minimal, low-latency UART logging system.
 ; Uses a 256-byte circular buffer aligned to a 256-byte boundary.
-; By default, this is placed at the end of RAM.
 ;
 ; To write to the log, use the macros in log_macros.inc.
 ; To print the contents of the log over the UART, call log_service
@@ -11,17 +10,17 @@
 
 ; Linear address of the 256-byte buffer.
 ; Must be aligned to a 256-byte boundary.
-LOG_BUFFER	equ	0x2300
+LOG_BUFFER	equ	0x2200
 
 ; Banked RAM locations used by logging system
 ; (directly before the log buffer)
-LOG_WREG_SAVE	equ	0x539		; bank 0x0A
-LOG_FSR0L_SAVE	equ	0x53a
-LOG_FSR0H_SAVE	equ	0x53b
-LOG_HEAD	equ	0x53c
-LOG_TAIL	equ	0x53d
-LOG_FMT_FLAGS	equ	0x53e		; hex count/newline/space flags
-LOG_CURR_BYTE	equ	0x53f
+LOG_WREG_SAVE	equ	0x4d0		; bank 0x0A
+LOG_FSR0L_SAVE	equ	0x4d1
+LOG_FSR0H_SAVE	equ	0x4d2
+LOG_HEAD	equ	0x4d3
+LOG_TAIL	equ	0x4d4
+LOG_FMT_FLAGS	equ	0x4d5		; hex count/newline/space flags
+LOG_CURR_BYTE	equ	0x4d6
 
 log_init
 	banksel	LOG_HEAD
@@ -36,10 +35,10 @@ _lsloop	movfw	LOG_TAIL	; if head == tail, buffer is empty
 	subwf	LOG_HEAD,w
 	skpnz
 	return
-;	banksel	LATA
-;	movlw	(1<<LATA5)
-;	xorwf	LATA,f
-;	banksel	LOG_HEAD
+	banksel	LATA
+	movlw	(1<<LATA5)
+	xorwf	LATA,f
+	banksel	LOG_HEAD
 ; dequeue a byte
 	movlw	LOG_BUFFER>>8
 	movwf	FSR0H

@@ -197,23 +197,12 @@ _wait_osc_ready
 
 ; Print a power-on character
 	call	log_init
-	logch	'^',LOG_NEWLINE
-	mloghex	8,0
-	mlogl	0x01
-	mlogl	0x23
-	mlogl	0x45
-	mlogl	0x67
-	mlogl	0x89
-	mlogl	0xAB
-	mlogl	0xCD
-	mlogl	0xEF
-	mlogch	'!',LOG_NEWLINE
-
+	logch	'^',0;,LOG_NEWLINE
 
 ; Initialize USB
-	;call	usb_init
-	;call	usb_attach
-	;bsf	INTCON,GIE	; enable interrupts
+	call	usb_init
+	call	usb_attach
+	bsf	INTCON,GIE	; enable interrupts
 
 ; Main loop
 loop	
@@ -223,9 +212,6 @@ loop
 	xorwf	LATA,f
 ; Print any pending characters in the log
 	call	log_service
-	mloghex	1,LOG_NEWLINE
-	mlogf	0x7F
-	incf	0x7F,f
 	goto	loop
 
 
