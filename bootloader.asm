@@ -653,14 +653,76 @@ _bcdone	movfw	FSR0L
 	return
 
 
+;;;;;;; Low-latency logging
+
+; Linear address of the 256-byte buffer
+; Aligned to a 256-byte boundary
+LOG_BUFFER	equ	0x2300
+
+; Banked RAM locations used by logging system
+; (directly before the log buffer)
+LOG_WREG_SAVE	equ	0x53b		; bank 0x0A
+LOG_FSR0L_SAVE	equ	0x53c
+LOG_FSR0H_SAVE	equ	0x53d
+LOG_HEAD	equ	0x53e
+LOG_TAIL	equ	0x53f
+
+log_init
+	banksel	LOG_HEAD
+	clrf	LOG_HEAD
+	clrf	LOG_TAIL
+	return
+
+log_service
+	return
+
 log_single_byte
-	return
-log_multi_byte_start
-	return
-log_byte
-	return
+	banksel	LOG_WREG_SAVE	; need to save W and FSR0
+	movwf	LOG_WREG_SAVE
+	movfw	FSR0L
+	movwf	LOG_FSR0L_SAVE
+	movfw	FSR0H
+	movwf	LOG_FSR0H_SAVE
+	call	_log_byte_inner	; and fall through
 log_multi_byte_end
+	banksel	LOG_FSR0L_SAVE	; (redundant when falling through)
+; restore registers
+	movfw	LOG_FSR0L_SAVE
+	movwf	FSR0L
+	movfw	LOG_FSR0H_SAVE
+	movwf	FSR0H
+	movfw	LOG_WREG_SAVE
 	return
+
+log_multi_byte_start
+; save FSR0
+	banksel	LOG_WREG_SAVE
+	movfw	FSR0L
+	movwf	LOG_FSR0L_SAVE
+	movfw	FSR0H
+	movwf	LOG_FSR0H_SAVE
+	return
+
+log_byte
+	banksel	LOG_WREG_SAVE
+	movwf	LOG_WREG_SAVE	;and fall through
+; load tail pointer into FSR0
+_log_byte_inner
+	movlw	LOG_BUFFER>>8
+	movwf	FSR0H
+	movfw	LOG_TAIL
+	movwf	FSR0L
+	movfw	LOG_WREG_SAVE	; write byte into log buffer
+	moviw	FSR0++		; advance tail pointer
+; save new tail pointer
+	movfw	FSR0L		; high byte is ignored for 256-byte wraparound
+	movwf	LOG_TAIL
+; always keep one slot open; if (tail+1)%256 == head, advance head
+	subwf	LOG_HEAD,w
+	skpnz
+	incf	LOG_HEAD,f
+	return
+
 
 
 	if 0
