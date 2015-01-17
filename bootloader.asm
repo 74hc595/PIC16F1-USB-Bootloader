@@ -181,8 +181,10 @@ _wait_osc_ready
 ; Turn on the LED
 	banksel TRISA
 	bcf	TRISA,TRISA4	; RA4 as output
+	bcf	TRISA,TRISA5	; RA5 as output
 	banksel	LATA
 	bsf	LATA,LATA4	; set RA4 high
+	bcf	LATA,LATA5
 
 ; Enable the UART
 	banksel	SPBRGL
@@ -192,13 +194,14 @@ _wait_osc_ready
 	bsf	RCSTA,SPEN	; enable serial port
 	bsf	TXSTA,TXEN	; enable transmission
 
-; Print a string
-	logch	'P',LOG_NEWLINE
+; Print a power-on character
+	call	log_init
+	logch	'^',LOG_NEWLINE
 
 ; Initialize USB
-	call	usb_init
-	call	usb_attach
-	bsf	INTCON,GIE	; enable interrupts
+	;call	usb_init
+	;call	usb_attach
+	;bsf	INTCON,GIE	; enable interrupts
 
 ; Main loop
 loop	
@@ -328,10 +331,11 @@ _uidle	btfsc	UIR,IDLEIF
 ; error?
 	btfss	UIR,UERRIF
 	goto	_utrans
-	logseq	'E'
-	loghex	1,LOG_NEWLINE
-	logf	UEIR
-	logend
+	mlog
+	mlogch	'E',0
+	mloghex	1,LOG_NEWLINE
+	mlogf	UEIR
+	mlogend
 	banksel	UEIR
 	clrf	UEIR		; clear error flags
 ; service transactions
@@ -387,17 +391,18 @@ _usb_ctrl_setup
 	andwf	BANKED_EP0OUT_BUF+bmRequestType,w
 	bnz	_unhreq			; ignore non-standard requests
 ; print packet
-	logseq	'P'
-	loghex	8,LOG_NEWLINE|LOG_SPACE
-	logf	BANKED_EP0OUT_BUF+0
-	logf	BANKED_EP0OUT_BUF+1
-	logf	BANKED_EP0OUT_BUF+2
-	logf	BANKED_EP0OUT_BUF+3
-	logf	BANKED_EP0OUT_BUF+4
-	logf	BANKED_EP0OUT_BUF+5
-	logf	BANKED_EP0OUT_BUF+6
-	logf	BANKED_EP0OUT_BUF+7
-	logend
+	mlog
+	mlogch	'P',0
+	mloghex	8,LOG_NEWLINE|LOG_SPACE
+	mlogf	BANKED_EP0OUT_BUF+0
+	mlogf	BANKED_EP0OUT_BUF+1
+	mlogf	BANKED_EP0OUT_BUF+2
+	mlogf	BANKED_EP0OUT_BUF+3
+	mlogf	BANKED_EP0OUT_BUF+4
+	mlogf	BANKED_EP0OUT_BUF+5
+	mlogf	BANKED_EP0OUT_BUF+6
+	mlogf	BANKED_EP0OUT_BUF+7
+	mlogend
 ;	movfw	BANKED_EP0OUT_BUF+0
 ;	call	uart_print_hex
 ;	banksel	BANKED_EP0OUT_BUF
@@ -440,11 +445,12 @@ _usb_ctrl_setup
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
 	bz	_usb_get_configuration
 ; unhandled request
-_unhreq	logseq	'?'
-	logl	'R'
-	loghex	1,LOG_NEWLINE
-	logf	BANKED_EP0OUT_BUF+bRequest
-	logend
+_unhreq	mlog
+	mlogch	'?',0
+	mlogch	'R',0
+	mloghex	1,LOG_NEWLINE
+	mlogf	BANKED_EP0OUT_BUF+bRequest
+	mlogend
 
 ; Finishes a SETUP transaction.
 _usb_ctrl_complete
@@ -509,11 +515,12 @@ _usb_get_descriptor
 	bz	_config_descriptor
 ; unsupported descriptor
 	bcf	USB_STATE,EP0_HANDLED
-	logseq	'?'
-	logl	'D'
-	loghex	1,LOG_NEWLINE
-	logf	BANKED_EP0OUT_BUF+wValueH
-	logend
+	mlog
+	mlogch	'?',0
+	mlogch	'D',0
+	mloghex	1,LOG_NEWLINE
+	mlogf	BANKED_EP0OUT_BUF+wValueH
+	mlogend
 	banksel	BANKED_EP0OUT_BUF
 	goto	_usb_ctrl_complete
 _device_descriptor
@@ -613,10 +620,11 @@ _check_for_pending_address
 	movfw	BANKED_EP0OUT_BUF+wValueL
 	banksel	UADDR
 	movwf	UADDR
-	logseq	'A'
-	loghex	1,LOG_NEWLINE
-	logf	UADDR
-	logend
+	mlog
+	mlogch	'A',0
+	mloghex	1,LOG_NEWLINE
+	mlogf	UADDR
+	mlogend
 	return
 
 
@@ -683,27 +691,32 @@ _lsloop	movfw	LOG_TAIL	; if head == tail, buffer is empty
 	subwf	LOG_HEAD,w
 	skpnz
 	return
+;	banksel	LATA
+;	movlw	(1<<LATA5)
+;	xorwf	LATA,f
+;	banksel	LOG_HEAD
 ; dequeue a byte
 	movlw	LOG_BUFFER>>8
 	movwf	FSR0H
-	movfw	LOG_TAIL
+	movfw	LOG_HEAD
 	movwf	FSR0L
 	moviw	FSR0++
 	movwf	LOG_CURR_BYTE
 ; save advanced head pointer
 	movfw	FSR0L
 	movwf	LOG_HEAD
-; process the byte
-	btfsc	LOG_CURR_BYTE,7	; is this a hex marker?
-	goto	_lsshex
 ; are we in hex mode?
 	btfsc	LOG_FMT_FLAGS,7
 	goto	_lsphex
+; process the byte
+	btfsc	LOG_CURR_BYTE,7	; is this a hex marker?
+	goto	_lsshex
 ; we're just in ASCII mode
 	movfw	LOG_CURR_BYTE
-	andlw	b'00111111'	; mask off high bytes
+	andlw	b'00111111'	; mask off high bits
+	addlw	32		; upper bits need to be set properly
 	call	_uart_print_ch
-	btfsc	LOG_FMT_FLAGS,6	; need to print a trailing newline?
+	btfsc	LOG_CURR_BYTE,6	; need to print a trailing newline?
 	call	_uart_print_nl
 	goto	_lsloop
 _lsshex	movfw	LOG_CURR_BYTE	; starting hex mode? write flags and loop
@@ -712,7 +725,7 @@ _lsshex	movfw	LOG_CURR_BYTE	; starting hex mode? write flags and loop
 _lsphex	btfsc	LOG_FMT_FLAGS,5	; need to print a leading space?
 	call	_uart_print_space
 	call	_uart_print_hex	; prints byte in LOG_CURR_BYTE
-	movwf	LOG_FMT_FLAGS	; decrement hex byte count
+	movfw	LOG_FMT_FLAGS	; decrement hex byte count
 	andlw	b'00011111'	; isolate count bits
 	decfsz	WREG,w		; subtract 1
 	goto	_nxthex
@@ -728,7 +741,7 @@ _nxthex	xorwf	LOG_FMT_FLAGS,w	; xor-swap new count and old flags
 	andlw	b'11100000'	; isolate old flags
 	iorwf	LOG_FMT_FLAGS,f	; write them back to LOG_FMT_FLAGS
 	goto	_lsloop
-	
+
 
 
 log_single_byte
