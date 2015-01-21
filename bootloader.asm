@@ -197,7 +197,7 @@ _wait_osc_ready
 
 ; Print a power-on character
 	call	log_init
-	logch	'^',0;,LOG_NEWLINE
+	logch	'^',LOG_NEWLINE
 
 ; Initialize USB
 	call	usb_init
@@ -586,6 +586,8 @@ _usb_get_configuration
 ; Handles an OUT control transfer on endpoint 0.
 ; BSR=0
 _usb_ctrl_out
+	logch	'O',LOG_NEWLINE
+	banksel	EP0_BUF_SIZE
 ; Only time this will get called is in the status stage of a control read,
 ; since we don't support any control writes with a data stage.
 ; All we have to do is re-arm the OUT endpoint.
@@ -601,6 +603,8 @@ _usb_ctrl_out
 ; Handles an IN control transfer on endpoint 0.
 ; BSR=0
 _usb_ctrl_in
+	logch	'I',LOG_NEWLINE
+	banksel	USB_STATE
 	btfsc	USB_STATE,IS_CONTROL_WRITE	; is this a control read or write?
 	goto	_check_for_pending_address
 ; fetch more data and re-arm the IN endpoint
@@ -637,9 +641,16 @@ _check_for_pending_address
 ;;;		EP0_DATA_IN_COUNT decremented
 ;;; clobbers:	W, FSR0, FSR1
 ep0_read_in
+	bcf	BANKED_EP0IN_STAT,UOWN	; make sure we have ownership of the buffer
+	mloghex 2,0
+	mlogf	EP0_DATA_IN_PTRH
+	mlogf	EP0_DATA_IN_PTRL
+	mloghex	1,LOG_SPACE
+	mlogf	EP0_DATA_IN_COUNT
+	banksel	BANKED_EP0IN_CNT
 	clrf	BANKED_EP0IN_CNT	; initialize buffer size to 0
 	tstf	EP0_DATA_IN_COUNT	; do nothing if there are 0 bytes to send
-	retz
+	bz	_r
 	movfw	EP0_DATA_IN_PTRL	; set up source pointer
 	movwf	FSR0L
 	movfw	EP0_DATA_IN_PTRH
@@ -660,6 +671,24 @@ _bcdone	movfw	FSR0L
 	movwf	EP0_DATA_IN_PTRL
 	movfw	FSR0H
 	movwf	EP0_DATA_IN_PTRH
+; print the bytes that were copied
+	mlogch	'[',0
+	mloghex	1,0
+	mlogf	BANKED_EP0IN_CNT
+	mlogch	']',0
+	mloghex	8,LOG_SPACE|LOG_NEWLINE
+	mlogf	0x6d;BANKED_EP0IN_BUF+0
+	mlogf	0x6e;BANKED_EP0IN_BUF+1
+	mlogf	0x6f;BANKED_EP0IN_BUF+2
+	mlogf	0xa0;BANKED_EP0IN_BUF+3
+	mlogf	0xa1;BANKED_EP0IN_BUF+4
+	mlogf	0xa2;BANKED_EP0IN_BUF+5
+	mlogf	0xa3;BANKED_EP0IN_BUF+6
+	mlogf	0xa4;BANKED_EP0IN_BUF+7
+	banksel	USB_STATE
+	return
+_r	mlogch	'-',LOG_NEWLINE
+	banksel	USB_STATE
 	return
 
 	include "log.asm"
