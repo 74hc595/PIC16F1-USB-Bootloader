@@ -404,30 +404,6 @@ _usb_ctrl_setup
 	mlogf	BANKED_EP0OUT_BUF+6
 	mlogf	BANKED_EP0OUT_BUF+7
 	mlogend
-;	movfw	BANKED_EP0OUT_BUF+0
-;	call	uart_print_hex
-;	banksel	BANKED_EP0OUT_BUF
-;	movfw	BANKED_EP0OUT_BUF+1
-;	call	uart_print_hex
-;	banksel	BANKED_EP0OUT_BUF
-;	movfw	BANKED_EP0OUT_BUF+2
-;	call	uart_print_hex
-;	banksel	BANKED_EP0OUT_BUF
-;	movfw	BANKED_EP0OUT_BUF+3
-;	call	uart_print_hex
-;	banksel	BANKED_EP0OUT_BUF
-;	movfw	BANKED_EP0OUT_BUF+4
-;	call	uart_print_hex
-;	banksel	BANKED_EP0OUT_BUF
-;	movfw	BANKED_EP0OUT_BUF+5
-;	call	uart_print_hex
-;	banksel	BANKED_EP0OUT_BUF
-;	movfw	BANKED_EP0OUT_BUF+6
-;	call	uart_print_hex
-;	banksel	BANKED_EP0OUT_BUF
-;	movfw	BANKED_EP0OUT_BUF+7
-;	call	uart_print_hex
-;	call	uart_print_nl
 	banksel	BANKED_EP0OUT_BUF
 ; check request number: is it Get Descriptor?
 	movlw	GET_DESCRIPTOR
@@ -514,7 +490,10 @@ _usb_get_descriptor
 	movlw	DESC_CONFIG
 	subwf	BANKED_EP0OUT_BUF+wValueH,w
 	bz	_config_descriptor
-; unsupported descriptor
+	movlw	DESC_STRING
+	subwf	BANKED_EP0OUT_BUF+wValueH,w
+	bz	_string_descriptor
+; unsupported descriptor type
 	bcf	USB_STATE,EP0_HANDLED
 	mlog
 	mlogch	'?',0
@@ -539,6 +518,37 @@ _config_descriptor
 	movwf	EP0_DATA_IN_PTRH
 	movlw	CONFIG_DESC_TOTAL_LEN	; length includes all subordinate descriptors
 	movwf	EP0_DATA_IN_COUNT
+	goto	_adjust_data_in_count
+_string_descriptor
+	movlw	NUM_STRING_DESCRIPTORS		; ensure descriptor number is valid
+	subwf	BANKED_EP0OUT_BUF+wValueL,w
+	bc	_invalid_string_descriptor_index
+	ldfsr0	STRING_DESCRIPTOR_OFFSETS	; index into offsets table
+	movfw	BANKED_EP0OUT_BUF+wValueL
+	addwf	FSR0L,f
+	movlw	0
+	addwfc	FSR0H,f
+	moviw	FSR0				; get offset
+	addwf	FSR0L,f				; add offset to current pointer
+	movlw	0
+	addwfc	FSR0H,f
+	moviw	FSR0				; get descriptor length
+	movwf	EP0_DATA_IN_COUNT
+	movfw	FSR0L				; save current pointer location 
+	movwf	EP0_DATA_IN_PTRL
+	movfw	FSR0H
+	movwf	EP0_DATA_IN_PTRH
+	goto	_adjust_data_in_count
+_invalid_string_descriptor_index
+	bcf	USB_STATE,EP0_HANDLED
+	mlog
+	mlogch	'?',0
+	mlogch	'S',0
+	mloghex	1,LOG_NEWLINE
+	mlogf	BANKED_EP0OUT_BUF+wValueH
+	mlogend
+	banksel	BANKED_EP0OUT_BUF
+	goto	_usb_ctrl_complete	
 ; the count needs to be set to the minimum of the descriptor's length (in W)
 ; and the requested length
 _adjust_data_in_count
@@ -764,7 +774,7 @@ _l1	bsf	PMCON1,RD	; initiate read
 DEVICE_DESCRIPTOR
 	dt	DEVICE_DESC_LEN	; bLength
 	dt	0x01		; bDescriptorType
-	dt	0x00, 0x02	; bcdUSB USB 2.0
+	dt	0x00, 0x02	; bcdUSB (USB 2.0)
 	dt	0x00		; bDeviceClass
 	dt	0x00		; bDeviceSubclass
 	dt	0x00		; bDeviceProtocol
@@ -772,9 +782,9 @@ DEVICE_DESCRIPTOR
 	dt	0xd8, 0x04	; idVendor (Microchip)
 	dt	0xdd, 0xdd	; idProduct (fake value)
 	dt	0x01, 0x00	; bcdDevice (1)
-	dt	0x00		; iManufacturer (TODO)
-	dt	0x00		; iProduct (TODO)
-	dt	0x00		; iSerialNumber (TODO)
+	dt	0x01		; iManufacturer (TODO)
+	dt	0x02		; iProduct (TODO)
+	dt	0x03		; iSerialNumber (TODO)
 	dt	0x01		; bNumConfigurations
 
 CONFIGURATION_DESCRIPTOR
@@ -798,5 +808,55 @@ INTERFACE_DESCRIPTOR
 	dt	0x00		; bInterfaceSubclass
 	dt	0x00		; bInterfaceProtocol
 	dt	0x00		; iInterface
+
+NUM_STRING_DESCRIPTORS	equ	4
+STRING_DESCRIPTOR_OFFSETS
+	dt	STRING_DESCRIPTOR_LANGS-$
+	dt	STRING_DESCRIPTOR_MANUFACTURER-$
+	dt	STRING_DESCRIPTOR_PRODUCT-$
+	dt	STRING_DESCRIPTOR_SERIAL_NUMBER-$
+
+STRING_DESCRIPTOR_LANGS
+	dt	0x04		; bLength
+	dt	0x03		; bDescriptorTYpe
+	dt	0x09, 0x04	; wLANGID[0] (American English)
+
+STRING_DESCRIPTOR_MANUFACTURER
+	dt	0x1A		; bLength
+	dt	0x03		; bDescriptorType
+	dt	'M', 0x00
+	dt	'a', 0x00
+	dt	't', 0x00
+	dt	't', 0x00
+	dt	' ', 0x00
+	dt	'S', 0x00
+	dt	'a', 0x00
+	dt	'r', 0x00
+	dt	'n', 0x00
+	dt	'o', 0x00
+	dt	'f', 0x00
+	dt	'f', 0x00
+
+STRING_DESCRIPTOR_PRODUCT
+	dt	0x12		; bLength
+	dt	0x03		; bDescriptorType
+	dt	'U', 0x00
+	dt	'S', 0x00
+	dt	'B', 0x00
+	dt	' ', 0x00
+	dt	'T', 0x00
+	dt	'e', 0x00
+	dt	's', 0x00
+	dt	't', 0x00
+
+STRING_DESCRIPTOR_SERIAL_NUMBER
+	dt	0x0E		; bLength
+	dt	0x03		; bDescriptorType
+	dt	'C', 0x00
+	dt	'R', 0x00
+	dt	'M', 0x00
+	dt	'1', 0x00
+	dt	'1', 0x00
+	dt	'4', 0x00
 
 	end	
