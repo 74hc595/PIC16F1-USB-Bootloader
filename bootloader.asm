@@ -445,28 +445,37 @@ _cvalid	bcf	USB_STATE,EP0_HANDLED	; clear for next transaction
 ; this is a control read; prepare the IN endpoint for the data stage
 ; and the OUT endpoint for the status stage
 _cread	call	ep0_read_in		; read data into IN buffer
-	movlw	_DAT1|_DTSEN		; arm IN buffer
-	movwf	BANKED_EP0IN_STAT
-	bsf	BANKED_EP0IN_STAT,UOWN
+	movlw	_DAT1|_DTSEN		; OUT buffer will be ready for status stage
+; value in W is used to specify the EP0 OUT flags
+_armbfs	movwf	BANKED_EP0OUT_STAT	; arm OUT buffer
 	movlw	EP0_BUF_SIZE
 	movwf	BANKED_EP0OUT_CNT
-	movlw	_DAT1|_DTSEN
-	movwf	BANKED_EP0OUT_STAT	; arm OUT buffer for status stage
 	bsf	BANKED_EP0OUT_STAT,UOWN
+	movlw	_DAT1|_DTSEN		; arm IN buffer
+; value in W is used to specify the EP0 IN flags
+_armin	movwf	BANKED_EP0IN_STAT
+	bsf	BANKED_EP0IN_STAT,UOWN
 	return
+;	movlw	_DAT1|_DTSEN
+;	movwf	BANKED_EP0OUT_STAT	; arm OUT buffer for status stage
+;	bsf	BANKED_EP0OUT_STAT,UOWN
+;	return
 
 ; this is a control write: prepare the IN endpoint for the status stage
 ; and the OUT endpoint for the next SETUP transaction
 _cwrite	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
-	movlw	_DAT1|_DTSEN
-	movwf	BANKED_EP0IN_STAT	; arm IN buffer for status stage
-	bsf	BANKED_EP0IN_STAT,UOWN
-	movlw	EP0_BUF_SIZE
-	movwf	BANKED_EP0OUT_CNT
-	movlw	_DAT0|_DTSEN|_BSTALL
-	movwf	BANKED_EP0OUT_STAT
-	bsf	BANKED_EP0OUT_STAT,UOWN
-	return
+	movlw	_DAT0|_DTSEN|_BSTALL	; make OUT buffer ready for next SETUP packet
+	goto	_armbfs			; arm OUT and IN buffers
+
+	;movlw	_DAT1|_DTSEN
+	;movwf	BANKED_EP0IN_STAT	; arm IN buffer for status stage
+	;bsf	BANKED_EP0IN_STAT,UOWN
+	;movlw	EP0_BUF_SIZE
+	;movwf	BANKED_EP0OUT_CNT
+	;movlw	_DAT0|_DTSEN|_BSTALL
+	;movwf	BANKED_EP0OUT_STAT
+	;bsf	BANKED_EP0OUT_STAT,UOWN
+	;return
 
 ; Handles a Get Descriptor request.
 ; BSR=0
@@ -617,9 +626,11 @@ _usb_ctrl_in
 	movlw	_DTSEN
 	btfss	BANKED_EP0IN_STAT,DTS	; toggle DTS
 	bsf	WREG,DTS
-	movwf	BANKED_EP0IN_STAT
-	bsf	BANKED_EP0IN_STAT,UOWN	; arm IN buffer
-	return
+	goto	_armin			; arm the IN buffer
+	;movwf	BANKED_EP0IN_STAT
+	;bsf	BANKED_EP0IN_STAT,UOWN	; arm IN buffer
+	;return
+	
 ; if this is the status stage of a Set Address request, assign the address here.
 ; The OUT buffer has already been armed for the next SETUP.
 _check_for_pending_address
