@@ -121,3 +121,9 @@ mlogend	macro
 	endif
 	endm
 
+; Bank-select macro that's not assembled if logging is disabled.
+lbnksel	macro	x
+	if	LOGGING_ENABLED
+	banksel	x
+	endif
+	endm

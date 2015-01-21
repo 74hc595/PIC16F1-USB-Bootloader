@@ -6,7 +6,8 @@
 ; FSR0L, FSR0H, FSR1L, and FSR1H are used to pass additional arguments
 ; to functions, and may be used as scratch registers inside of functions.
 
-LOGGING_ENABLED	equ	1
+LOGGING_ENABLED		equ	0
+USE_STRING_DESCRIPTORS	equ	0
 
 	radix dec
 	list n=0,st=off
@@ -56,8 +57,7 @@ LINEAR_GET_CONFIG_BUF	equ	0x2000+(GET_CONFIG_BUF-0x20)
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
 EP0_HANDLED		equ	1	; last endpoint 0 transaction was handled; will stall if 0
 ADDRESS_PENDING		equ	2	; need to set address in next IN transaction
-EP0_IN_ALL_SENT		equ	3	; all data packets for EP0 IN transaction have been sent
-DEVICE_CONFIGURED	equ	4	; the device is configured
+DEVICE_CONFIGURED	equ	3	; the device is configured
 
 ;;; Macros
 	nolist
@@ -179,14 +179,7 @@ _wait_osc_ready
 	movlw	(1<<ACTSRC)|(1<<ACTEN)
 	movwf	ACTCON		; source = USB
 
-; Turn on the LED
-	banksel TRISA
-	bcf	TRISA,TRISA4	; RA4 as output
-	bcf	TRISA,TRISA5	; RA5 as output
-	banksel	LATA
-	bsf	LATA,LATA4	; set RA4 high
-	bcf	LATA,LATA5
-
+	if LOGGING_ENABLED
 ; Enable the UART
 	banksel	SPBRGL
 	movlw	low BAUDVAL	; set baud rate divisor
@@ -194,10 +187,10 @@ _wait_osc_ready
 	bsf	TXSTA,BRGH	; high speed
 	bsf	RCSTA,SPEN	; enable serial port
 	bsf	TXSTA,TXEN	; enable transmission
-
 ; Print a power-on character
 	call	log_init
 	logch	'^',LOG_NEWLINE
+	endif
 
 ; Initialize USB
 	call	usb_init
@@ -206,12 +199,10 @@ _wait_osc_ready
 
 ; Main loop
 loop	
-; Blink the LED
-	banksel	LATA
-	movlw	(1<<LATA4)
-	xorwf	LATA,f
+	if LOGGING_ENABLED
 ; Print any pending characters in the log
 	call	log_service
+	endif
 	goto	loop
 
 
@@ -308,6 +299,7 @@ _usben	bsf	UCON,USBEN	; enable USB module and wait until ready
 	btfss	UCON,USBEN
 	goto	_usben
 	logch	'!',LOG_NEWLINE
+	return
 
 
 
@@ -337,11 +329,10 @@ _uidle	btfsc	UIR,IDLEIF
 	mloghex	1,LOG_NEWLINE
 	mlogf	UEIR
 	mlogend
-	banksel	UEIR
+	lbnksel	UEIR
 	clrf	UEIR		; clear error flags
 ; service transactions
-_utrans	banksel	UIR
-	btfss	UIR,TRNIF
+_utrans	btfss	UIR,TRNIF
 	goto	_usdone
 	movfw	USTAT		; stash the status in a temp register
 	movwf	FSR1H
@@ -382,7 +373,6 @@ usb_service_ep0
 _usb_ctrl_setup
 ; ensure the OUT endpoint isn't armed
 	bcf	BANKED_EP0OUT_STAT,UOWN	; take ownership of EP0 OUT buffer
-	bcf	USB_STATE,EP0_IN_ALL_SENT
 	bcf	USB_STATE,IS_CONTROL_WRITE
 ; get bmRequestType
 	movfw	BANKED_EP0OUT_BUF+bmRequestType
@@ -404,7 +394,7 @@ _usb_ctrl_setup
 	mlogf	BANKED_EP0OUT_BUF+6
 	mlogf	BANKED_EP0OUT_BUF+7
 	mlogend
-	banksel	BANKED_EP0OUT_BUF
+	lbnksel	BANKED_EP0OUT_BUF
 ; check request number: is it Get Descriptor?
 	movlw	GET_DESCRIPTOR
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
@@ -438,7 +428,7 @@ _usb_ctrl_complete
 	btfsc	USB_STATE,EP0_HANDLED
 	goto	_cvalid
 	logch	'X',LOG_NEWLINE
-	banksel	BANKED_EP0IN
+	lbnksel	BANKED_EP0IN
 	movlw	_DAT0|_DTSEN|_BSTALL
 	movwf	BANKED_EP0IN_STAT	; stall the EP0 IN endpoint
 	bsf	BANKED_EP0IN_STAT,UOWN	; and arm it
@@ -449,8 +439,7 @@ _usb_ctrl_complete
 	bsf	BANKED_EP0OUT_STAT,UOWN	; and arm it
 	return
 
-_cvalid	banksel	USB_STATE
-	bcf	USB_STATE,EP0_HANDLED	; clear for next transaction
+_cvalid	bcf	USB_STATE,EP0_HANDLED	; clear for next transaction
 	btfsc	USB_STATE,IS_CONTROL_WRITE
 	goto	_cwrite
 ; this is a control read; prepare the IN endpoint for the data stage
@@ -490,9 +479,11 @@ _usb_get_descriptor
 	movlw	DESC_CONFIG
 	subwf	BANKED_EP0OUT_BUF+wValueH,w
 	bz	_config_descriptor
+	if USE_STRING_DESCRIPTORS
 	movlw	DESC_STRING
 	subwf	BANKED_EP0OUT_BUF+wValueH,w
 	bz	_string_descriptor
+	endif
 ; unsupported descriptor type
 	bcf	USB_STATE,EP0_HANDLED
 	mlog
@@ -501,7 +492,7 @@ _usb_get_descriptor
 	mloghex	1,LOG_NEWLINE
 	mlogf	BANKED_EP0OUT_BUF+wValueH
 	mlogend
-	banksel	BANKED_EP0OUT_BUF
+	lbnksel	BANKED_EP0OUT_BUF
 	goto	_usb_ctrl_complete
 _device_descriptor
 	movlw	low DEVICE_DESCRIPTOR
@@ -518,6 +509,8 @@ _config_descriptor
 	movwf	EP0_DATA_IN_PTRH
 	movlw	CONFIG_DESC_TOTAL_LEN	; length includes all subordinate descriptors
 	movwf	EP0_DATA_IN_COUNT
+
+	if USE_STRING_DESCRIPTORS
 	goto	_adjust_data_in_count
 _string_descriptor
 	movlw	NUM_STRING_DESCRIPTORS		; ensure descriptor number is valid
@@ -547,8 +540,10 @@ _invalid_string_descriptor_index
 	mloghex	1,LOG_NEWLINE
 	mlogf	BANKED_EP0OUT_BUF+wValueH
 	mlogend
-	banksel	BANKED_EP0OUT_BUF
-	goto	_usb_ctrl_complete	
+	lbnksel	BANKED_EP0OUT_BUF
+	goto	_usb_ctrl_complete
+	endif
+
 ; the count needs to be set to the minimum of the descriptor's length (in W)
 ; and the requested length
 _adjust_data_in_count
@@ -597,7 +592,7 @@ _usb_get_configuration
 ; BSR=0
 _usb_ctrl_out
 	logch	'O',LOG_NEWLINE
-	banksel	EP0_BUF_SIZE
+	lbnksel	EP0_BUF_SIZE
 ; Only time this will get called is in the status stage of a control read,
 ; since we don't support any control writes with a data stage.
 ; All we have to do is re-arm the OUT endpoint.
@@ -614,7 +609,7 @@ _usb_ctrl_out
 ; BSR=0
 _usb_ctrl_in
 	logch	'I',LOG_NEWLINE
-	banksel	USB_STATE
+	lbnksel	USB_STATE
 	btfsc	USB_STATE,IS_CONTROL_WRITE	; is this a control read or write?
 	goto	_check_for_pending_address
 ; fetch more data and re-arm the IN endpoint
@@ -657,10 +652,14 @@ ep0_read_in
 	mlogf	EP0_DATA_IN_PTRL
 	mloghex	1,LOG_SPACE
 	mlogf	EP0_DATA_IN_COUNT
-	banksel	BANKED_EP0IN_CNT
+	lbnksel	BANKED_EP0IN_CNT
 	clrf	BANKED_EP0IN_CNT	; initialize buffer size to 0
 	tstf	EP0_DATA_IN_COUNT	; do nothing if there are 0 bytes to send
-	bz	_r
+	if LOGGING_ENABLED
+	bz	_nodata
+	else
+	retz
+	endif
 	movfw	EP0_DATA_IN_PTRL	; set up source pointer
 	movwf	FSR0L
 	movfw	EP0_DATA_IN_PTRH
@@ -695,78 +694,17 @@ _bcdone	movfw	FSR0L
 	mlogf	0xa2;BANKED_EP0IN_BUF+5
 	mlogf	0xa3;BANKED_EP0IN_BUF+6
 	mlogf	0xa4;BANKED_EP0IN_BUF+7
-	banksel	USB_STATE
+	lbnksel	USB_STATE
 	return
-_r	mlogch	'-',LOG_NEWLINE
-	banksel	USB_STATE
+	if LOGGING_ENABLED
+_nodata	mlogch	' ',LOG_NEWLINE
+	lbnksel	USB_STATE
 	return
-
-	include "log.asm"
-
-	if 0
-;;; Transmits a newline over the UART.
-;;; arguments:	none
-;;; returns:	none
-;;; clobbers:	W, BSR
-uart_print_nl
-	movlw	'\n'		; fall through to uart_print_char
-
-
-
-;;; Transmits a character over the UART and returns when complete.
-;;; arguments:	character in W
-;;; returns:	none
-;;; clobbers:	BSR
-uart_print_char
-	banksel	TXREG
-	movwf	TXREG		; transmit the character
-	banksel	PIR1		; need 1 cycle delay before checking TXIF
-	waitfs	PIR1,TXIF	; loop until character is sent
-	return
-
-
-
-;;; Transmits a null-terminated string over the UART.
-;;; arguments:	pointer to string in FSR0
-;;; returns:	none
-;;; clobbers:	FSR0, W, BSR
-uart_print_str
-	moviw	FSR0++		; get a character and advance
-	retz			; return if zero
-	call	uart_print_char
-	goto	uart_print_str	; next character
-
-
-
-;;; Transmits a null-terminated packed (2 characters per word) ASCII string.
-;;; from program memory over the UART.
-;;; arguments:	pointer to string in PMADRH:PMADRL
-;;		BSR=3
-;;; returns:	none
-;;; clobbers:	W, BSR, PMADRH:PMADRL
-uart_print_packed_str
-	bcf	PMCON1,CFGS	; don't read from configuration space
-_l1	bsf	PMCON1,RD	; initiate read
-	nop
-	nop
-	lslf	PMDATL,f	; shift lsb of high byte into PMDATH
-	rlf	PMDATH,w
-	tstf	WREG		; needed because rlf doesn't affect the Z flag
-	retz			; return if high byte is 0
-	call	uart_print_char	; print high byte
-	banksel	PMDATL
-	lsrf	PMDATL,w	; readjust PMDATL (this *does* affect the Z flag)
-	retz			; return if low byte is 0
-	call	uart_print_char	; print low byte
-	banksel	PMADRL		; advance to next word
-	incf	PMADRL,f
-	skpnc
-	incf	PMADRH,f
-	goto	_l1
 	endif
 
-
-
+	if LOGGING_ENABLED
+	include "log.asm"
+	endif
 
 
 
@@ -809,6 +747,7 @@ INTERFACE_DESCRIPTOR
 	dt	0x00		; bInterfaceProtocol
 	dt	0x00		; iInterface
 
+	if USE_STRING_DESCRIPTORS
 NUM_STRING_DESCRIPTORS	equ	4
 STRING_DESCRIPTOR_OFFSETS
 	dt	STRING_DESCRIPTOR_LANGS-$
@@ -858,5 +797,6 @@ STRING_DESCRIPTOR_SERIAL_NUMBER
 	dt	'1', 0x00
 	dt	'1', 0x00
 	dt	'4', 0x00
-
+	endif
+	
 	end	

@@ -35,10 +35,6 @@ _lsloop	movfw	LOG_TAIL	; if head == tail, buffer is empty
 	subwf	LOG_HEAD,w
 	skpnz
 	return
-	banksel	LATA
-	movlw	(1<<LATA5)
-	xorwf	LATA,f
-	banksel	LOG_HEAD
 ; dequeue a byte
 	movlw	LOG_BUFFER>>8
 	movwf	FSR0H
