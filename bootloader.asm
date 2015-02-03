@@ -33,12 +33,16 @@ DEVICE_DESC_LEN		equ	18
 CONFIG_DESC_TOTAL_LEN	equ	67
 
 EP0_BUF_SIZE 		equ	8	; endpoint 0 buffer size
+EP1_BUF_SIZE		equ	64	; endpoint 1 (CDC data) buffer size
+EP2_BUF_SIZE		equ	8	; endpoint 2 (CDC communication) buffer size
 RESERVED_RAM_SIZE	equ	5	; amount of RAM reserved by the bootloader
 EP0OUT_BUF		equ	BUF_START+RESERVED_RAM_SIZE
 EP0IN_BUF		equ	EP0OUT_BUF+EP0_BUF_SIZE
 BANKED_EP0OUT_BUF	equ	BANKED_BUF_START+RESERVED_RAM_SIZE
 BANKED_EP0IN_BUF	equ	BANKED_EP0OUT_BUF+EP0_BUF_SIZE	; EP0IN buffer spills over to bank 1... deal with it
-
+EP1OUT_BUF		equ	EP0IN_BUF+EP0_BUF_SIZE
+EP1IN_BUF		equ	EP1OUT_BUF+EP1_BUF_SIZE
+EP2IN_BUF		equ	EP1IN_BUF+EP1_BUF_SIZE
 
 
 ;;; Variables
@@ -712,9 +716,43 @@ _nodata	mlogch	' ',LOG_NEWLINE
 ;;; Initializes the buffers for the CDC endpoints (1 OUT, 1 IN, and 2 IN).
 ;;; arguments:	none
 ;;; returns:	none
-;;; clobbers:
+;;; clobbers:	W, BSR=0
 cdc_init
-	; TODO
+	mlogch	'@',LOG_NEWLINE
+	banksel	UEP1
+	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPOUTEN)|(1<<EPINEN)
+	movwf	UEP1
+	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPINEN)
+	movwf	UEP2
+_arm_cdc_eps
+	banksel	BANKED_EP1OUT
+	; initialize EP1 OUT buffer
+	movlw	EP1_BUF_SIZE	; set CNT
+	movwf	BANKED_EP1OUT_CNT
+	movlw	low EP1OUT_BUF	; set ADRL
+	movwf	BANKED_EP1OUT_ADRL
+	movlw	EP1OUT_BUF>>8	; set ADRH
+	movwf	BANKED_EP1OUT_ADRH
+	; initialize EP1 IN buffer
+	clrf	BANKED_EP1IN_CNT
+	movlw	low EP1IN_BUF	; set ADRL
+	movwf	BANKED_EP1IN_ADRL
+	movlw	EP1IN_BUF>>8	; set ADRH
+	movwf	BANKED_EP1IN_ADRH
+	; initialize EP2 IN buffer
+	clrf	BANKED_EP2IN_CNT
+	movlw	low EP2IN_BUF	; set ADRL
+	movwf	BANKED_EP2IN_ADRL
+	movlw	EP2IN_BUF>>8	; set ADRH
+	movwf	BANKED_EP2IN_ADRH
+	; set STAT values for all buffers and arm them
+	movlw	_DAT0|_DTSEN
+	movwf	BANKED_EP1OUT_STAT
+	movwf	BANKED_EP1IN_STAT
+	movwf	BANKED_EP2IN_STAT
+	bsf	BANKED_EP1OUT_STAT,UOWN
+	bsf	BANKED_EP1IN_STAT,UOWN
+	bsf	BANKED_EP2IN_STAT,UOWN
 	return
 
 
@@ -727,8 +765,11 @@ usb_service_cdc
 	; TODO
 	mlogch	'%',0
 	mloghex	1,LOG_NEWLINE
-	mlogf	USTAT
-	return
+	mlogf	FSR1H		; print USTAT
+	; 0x0C - 0b0 0001 1 00	; endpoint 1 IN
+	; 0x08 - 0b0 0001 0 00	; endpoint 1 OUT
+	; 0x14 - 0b0 0010 1 00	; endpoint 2 IN
+	goto	_arm_cdc_eps	; ignore request, just rearm buffers
 
 
 
@@ -780,7 +821,7 @@ ABSTRACT_CONTROL_MANAGEMENT_FUNCTIONAL_DESCRIPTOR
 	dt	0x04		; bFunctionLength
 	dt	0x24		; bDescriptorType (CS_INTERFACE)
 	dt	0x02		; bDescriptorSubtype (abstract control management functional descriptor)
-	dt	0x00		; bmCapabilities
+	dt	0x02		; bmCapabilities
 
 UNION_FUNCTIONAL_DESCRIPTOR
 	dt	0x05		; bFunctionLength
