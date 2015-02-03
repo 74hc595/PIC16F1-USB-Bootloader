@@ -6,7 +6,7 @@
 ; FSR0L, FSR0H, FSR1L, and FSR1H are used to pass additional arguments
 ; to functions, and may be used as scratch registers inside of functions.
 
-LOGGING_ENABLED		equ	0
+LOGGING_ENABLED		equ	1
 USE_STRING_DESCRIPTORS	equ	0
 
 	radix dec
@@ -29,10 +29,8 @@ FOSC			equ	48000000
 BAUD			equ	38400
 BAUDVAL			equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
 
-NUM_CONFIGS		equ	1
-NUM_INTERFACES		equ	1
-NUM_ENDPOINTS		equ	0	; other than endpoint 0
-CONFIG_DESC_TOTAL_LEN	equ	CONFIG_DESC_LEN+(NUM_INTERFACES*INTF_DESC_LEN)+(NUM_ENDPOINTS*ENDPT_DESC_LEN)
+DEVICE_DESC_LEN		equ	18
+CONFIG_DESC_TOTAL_LEN	equ	67
 
 EP0_BUF_SIZE 		equ	8	; endpoint 0 buffer size
 RESERVED_RAM_SIZE	equ	5	; amount of RAM reserved by the bootloader
@@ -338,7 +336,7 @@ _utrans	btfss	UIR,TRNIF
 	movwf	FSR1H
 	bcf	UIR,TRNIF	; clear flag and advance USTAT fifo
 	andlw	b'01111000'	; check endpoint number
-	bnz	_utrans		; if not endpoint 0, loop (TODO)
+	bnz	_ucdc		; if not endpoint 0, it's a CDC message
 	movfw	FSR1H		; bring original USTAT value back to W
 	call	usb_service_ep0	; handle the control message
 	goto	_utrans
@@ -346,6 +344,9 @@ _utrans	btfss	UIR,TRNIF
 _usdone	banksel	PIR2
 	bcf	PIR2,USBIF
 	return
+_ucdc	call	usb_service_cdc
+	banksel	UIR
+	goto	_utrans
 
 
 
@@ -456,10 +457,7 @@ _armbfs	movwf	BANKED_EP0OUT_STAT	; arm OUT buffer
 _armin	movwf	BANKED_EP0IN_STAT
 	bsf	BANKED_EP0IN_STAT,UOWN
 	return
-;	movlw	_DAT1|_DTSEN
-;	movwf	BANKED_EP0OUT_STAT	; arm OUT buffer for status stage
-;	bsf	BANKED_EP0OUT_STAT,UOWN
-;	return
+
 
 ; this is a control write: prepare the IN endpoint for the status stage
 ; and the OUT endpoint for the next SETUP transaction
@@ -467,15 +465,6 @@ _cwrite	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
 	movlw	_DAT0|_DTSEN|_BSTALL	; make OUT buffer ready for next SETUP packet
 	goto	_armbfs			; arm OUT and IN buffers
 
-	;movlw	_DAT1|_DTSEN
-	;movwf	BANKED_EP0IN_STAT	; arm IN buffer for status stage
-	;bsf	BANKED_EP0IN_STAT,UOWN
-	;movlw	EP0_BUF_SIZE
-	;movwf	BANKED_EP0OUT_CNT
-	;movlw	_DAT0|_DTSEN|_BSTALL
-	;movwf	BANKED_EP0OUT_STAT
-	;bsf	BANKED_EP0OUT_STAT,UOWN
-	;return
 
 ; Handles a Get Descriptor request.
 ; BSR=0
@@ -577,6 +566,7 @@ _usb_set_configuration
 	tstf	BANKED_EP0OUT_BUF+wValueL	; anything other than 0 is valid
 	skpz
 	bsf	USB_STATE,DEVICE_CONFIGURED
+	call	cdc_init
 	bsf	USB_STATE,EP0_HANDLED
 	goto	_usb_ctrl_complete
 
@@ -719,44 +709,128 @@ _nodata	mlogch	' ',LOG_NEWLINE
 
 
 
+;;; Initializes the buffers for the CDC endpoints (1 OUT, 1 IN, and 2 IN).
+;;; arguments:	none
+;;; returns:	none
+;;; clobbers:
+cdc_init
+	; TODO
+	return
+
+
+
+;;; Services a transaction on one of the CDC endpoints.
+;;; arguments:	none
+;;; returns:	none
+;;; clobbers:	none
+usb_service_cdc
+	; TODO
+	mlogch	'%',0
+	mloghex	1,LOG_NEWLINE
+	mlogf	USTAT
+	return
+
+
+
 ;;; Descriptors
 DEVICE_DESCRIPTOR
-	dt	DEVICE_DESC_LEN	; bLength
+	dt	0x12		; bLength
 	dt	0x01		; bDescriptorType
 	dt	0x00, 0x02	; bcdUSB (USB 2.0)
-	dt	0x00		; bDeviceClass
+	dt	0x02		; bDeviceClass (communication device)
 	dt	0x00		; bDeviceSubclass
 	dt	0x00		; bDeviceProtocol
 	dt	0x08		; bMaxPacketSize0 (8 bytes)
 	dt	0xd8, 0x04	; idVendor (Microchip)
 	dt	0xdd, 0xdd	; idProduct (fake value)
 	dt	0x01, 0x00	; bcdDevice (1)
-	dt	0x01		; iManufacturer (TODO)
-	dt	0x02		; iProduct (TODO)
-	dt	0x03		; iSerialNumber (TODO)
+	dt	0x00		; iManufacturer
+	dt	0x00		; iProduct
+	dt	0x00		; iSerialNumber	(TODO)
 	dt	0x01		; bNumConfigurations
 
 CONFIGURATION_DESCRIPTOR
-	dt	CONFIG_DESC_LEN	; bLength
+	dt	0x09		; bLength
 	dt	0x02		; bDescriptorType
-	dt	low CONFIG_DESC_TOTAL_LEN	; wTotalLengthL
-	dt	high CONFIG_DESC_TOTAL_LEN	; wTotalLengthH
-	dt	0x01		; bNumInterfaces
+	dt	0x43, 0x00	; wTotalLength
+	dt	0x02		; bNumInterfaces
 	dt	0x01		; bConfigurationValue
 	dt	0x00		; iConfiguration
 	dt	b'11000000'	; bmAttributes (self-powered)
 	dt	0x19		; bMaxPower (25 -> 50 mA)
 
-INTERFACE_DESCRIPTOR
-	dt	INTF_DESC_LEN	; bLength
-	dt	0x04		; bDescriptorType
+INTERFACE_DESCRIPTOR_0
+	dt	0x09		; bLength
+	dt	0x04		; bDescriptorType (INTERFACE)
 	dt	0x00		; bInterfaceNumber
 	dt	0x00		; bAlternateSetting
-	dt	0x00		; bNumEndpoints (TODO)
-	dt	0xFF		; bInterfaceClass (TODO)
+	dt	0x01		; bNumEndpoints
+	dt	0x02		; bInterfaceClass (communication)
+	dt	0x02		; bInterfaceSubclass (abstract control model)
+	dt	0x01		; bInterfaceProtocol (V.25ter, common AT commands)
+	dt	0x00		; iInterface
+
+HEADER_FUNCTIONAL_DESCRIPTOR
+	dt	0x05		; bFunctionLength
+	dt	0x24		; bDescriptorType (CS_INTERFACE)
+	dt	0x00		; bDescriptorSubtype (header functional descriptor)
+	dt	0x10,0x01	; bcdCDC (specification version, 1.1)
+
+ABSTRACT_CONTROL_MANAGEMENT_FUNCTIONAL_DESCRIPTOR
+	dt	0x04		; bFunctionLength
+	dt	0x24		; bDescriptorType (CS_INTERFACE)
+	dt	0x02		; bDescriptorSubtype (abstract control management functional descriptor)
+	dt	0x00		; bmCapabilities
+
+UNION_FUNCTIONAL_DESCRIPTOR
+	dt	0x05		; bFunctionLength
+	dt	0x24		; bDescriptorType (CS_INTERFACE)
+	dt	0x06		; bDescriptorSubtype (union functional descriptor)
+	dt	0x00		; bMasterInterface
+	dt	0x01		; bSlaveInterface0
+
+CALL_MANAGEMENT_FUNCTIONAL_DESCRIPTOR
+	dt	0x05		; bFunctionLength
+	dt	0x24		; bDescriptorType (CS_INTERFACE)
+	dt	0x01		; bDescriptorSubtype (call management functional descriptor)
+	dt	0x00		; bmCapabilities (doesn't handle call management)
+	dt	0x01		; dDataInterface
+
+ENDPOINT_DESCRIPTOR_2_IN
+	dt	0x07		; bLength
+	dt	0x05		; bDescriptorType (ENDPOINT)
+	dt	0x82		; bEndpointAddress (2 IN)
+	dt	0x03		; bmAttributes (transfer type: interrupt)
+	dt	0x08, 0x00	; wMaxPacketSize (8)
+	dt	0x02		; bInterval
+
+INTERFACE_DESCRIPTOR_1
+	dt	0x09		; bLength
+	dt	0x04		; bDescriptorType (INTERFACE)
+	dt	0x01		; bInterfaceNumber
+	dt	0x00		; bAlternateSetting
+	dt	0x02		; bNumEndpoints
+	dt	0x0a		; bInterfaceClass (data)
 	dt	0x00		; bInterfaceSubclass
 	dt	0x00		; bInterfaceProtocol
 	dt	0x00		; iInterface
+
+ENDPOINT_DESCRIPTOR_1_IN
+	dt	0x07		; bLength
+	dt	0x05		; bDescriptorType (ENDPOINT)
+	dt	0x81		; bEndpointAddress (1 IN)
+	dt	0x02		; bmAttributes (transfer type: bulk)
+	dt	0x40, 0x00	; wMaxPacketSize (64)
+	dt	0x00		; bInterval
+
+ENDPOINT_DESCRIPTOR_1_OUT
+	dt	0x07		; bLength
+	dt	0x05		; bDescriptorType (ENDPOINT)
+	dt	0x01		; bEndpointAddress (1 OUT)
+	dt	0x02		; bmAttributes (transfer type: bulk)
+	dt	0x40, 0x00	; wMaxPacketSize (64)
+	dt	0x00		; bInterval
+
 
 	if USE_STRING_DESCRIPTORS
 NUM_STRING_DESCRIPTORS	equ	4
