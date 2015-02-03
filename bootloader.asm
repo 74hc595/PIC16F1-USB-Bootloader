@@ -348,7 +348,7 @@ _utrans	btfss	UIR,TRNIF
 _usdone	banksel	PIR2
 	bcf	PIR2,USBIF
 	return
-_ucdc	call	usb_service_cdc
+_ucdc	call	usb_service_cdc	; USTAT value is still in FSR1H
 	banksel	UIR
 	goto	_utrans
 
@@ -746,30 +746,38 @@ _arm_cdc_eps
 	movlw	EP2IN_BUF>>8	; set ADRH
 	movwf	BANKED_EP2IN_ADRH
 	; set STAT values for all buffers and arm them
-	movlw	_DAT0|_DTSEN
+	movlw	_DAT0;		; no data toggle, aint nobody got time for that
 	movwf	BANKED_EP1OUT_STAT
 	movwf	BANKED_EP1IN_STAT
 	movwf	BANKED_EP2IN_STAT
+	bsf	BANKED_EP2IN_STAT,UOWN
+_arm_ep1_out
 	bsf	BANKED_EP1OUT_STAT,UOWN
 	bsf	BANKED_EP1IN_STAT,UOWN
-	bsf	BANKED_EP2IN_STAT,UOWN
 	return
 
 
 
 ;;; Services a transaction on one of the CDC endpoints.
-;;; arguments:	none
+;;; arguments:	USTAT value in FSR1H
 ;;; returns:	none
 ;;; clobbers:	none
 usb_service_cdc
 	; TODO
-	mlogch	'%',0
-	mloghex	1,LOG_NEWLINE
-	mlogf	FSR1H		; print USTAT
 	; 0x0C - 0b0 0001 1 00	; endpoint 1 IN
 	; 0x08 - 0b0 0001 0 00	; endpoint 1 OUT
 	; 0x14 - 0b0 0010 1 00	; endpoint 2 IN
-	goto	_arm_cdc_eps	; ignore request, just rearm buffers
+	movlw	0x08		; check if it's on 1 OUT
+	subwf	FSR1H,w
+	bnz	_arm_cdc_eps	; ignore request, just rearm buffers
+	mlog
+	mlogch	'%',0
+	mloghex 2,LOG_SPACE|LOG_NEWLINE
+	mlogf	BANKED_EP1OUT_CNT
+	ldfsr1	EP1OUT_BUF
+	mlogf	INDF1
+	mlogend
+	goto	_arm_ep1_out
 
 
 
