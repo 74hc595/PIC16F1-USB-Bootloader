@@ -758,9 +758,7 @@ _arm_cdc_eps
 	movlw	EP1OUT_BUF>>8	; set ADRH
 	movwf	BANKED_EP1OUT_ADRH
 	; initialize EP1 IN buffer
-	movlw	1
-	movwf	BANKED_EP1IN_CNT
-	movlw	low EP1IN_BUF	; set ADRL
+	movlw	low EP1IN_BUF	; set ADRL, CNT gets set in _arm_ep1_in
 	movwf	BANKED_EP1IN_ADRL
 	movlw	EP1IN_BUF>>8	; set ADRH
 	movwf	BANKED_EP1IN_ADRH
@@ -774,6 +772,7 @@ _arm_cdc_eps
 	bsf	BANKED_EP1OUT_STAT,UOWN
 	clrw	
 _arm_ep1_in
+	clrf	BANKED_EP1IN_CNT	; next packet will have 0 length (unless another OUT is received)
 	andwf	BANKED_EP1IN_STAT,f	; clear all bits (except DTS if bit is set in W)
 	xorwf	BANKED_EP1IN_STAT,f	; update data toggle (if bit is set in W)
 	bsf	BANKED_EP1IN_STAT,UOWN
@@ -791,6 +790,8 @@ usb_service_cdc
 	banksel	BANKED_EP1IN_CNT
 	bbfs	FSR1H,DIR,_arm_ep1_in	; if endpoint 1 IN, rearm buffer
 _cdc_ep1_out
+	movlw	1			; send a 1 character response
+	movwf	BANKED_EP1IN_CNT
 	mlogch	'%',0
 	mloghex	2,LOG_SPACE|LOG_NEWLINE
 	mlogf	BANKED_EP1OUT_CNT
