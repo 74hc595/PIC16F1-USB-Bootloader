@@ -34,26 +34,27 @@ CONFIG_DESC_TOTAL_LEN	equ	67
 
 EP0_BUF_SIZE 		equ	8	; endpoint 0 buffer size
 EP1_BUF_SIZE		equ	64	; endpoint 1 (CDC data) buffer size
-EP2_BUF_SIZE		equ	8	; endpoint 2 (CDC communication) buffer size
-RESERVED_RAM_SIZE	equ	5	; amount of RAM reserved by the bootloader
-EP0OUT_BUF		equ	BUF_START+RESERVED_RAM_SIZE
+
+; Since we're only using 5 endpoints, use the BDT area for buffers,
+; and use the 4 bytes normally occupied by the endpoint 2 OUT BD for variables.
+USB_STATE		equ	BANKED_EP2OUT+0
+EP0_DATA_IN_PTRL	equ	BANKED_EP2OUT+1	; pointer to block of data to be sent
+EP0_DATA_IN_PTRH	equ	BANKED_EP2OUT+2	;   in the current EP0 IN transaction
+EP0_DATA_IN_COUNT	equ	BANKED_EP2OUT+3	; remaining bytes to be sent
+
+EP0OUT_BUF		equ	EP3OUT
 EP0IN_BUF		equ	EP0OUT_BUF+EP0_BUF_SIZE
-BANKED_EP0OUT_BUF	equ	BANKED_BUF_START+RESERVED_RAM_SIZE
-BANKED_EP0IN_BUF	equ	BANKED_EP0OUT_BUF+EP0_BUF_SIZE	; EP0IN buffer spills over to bank 1... deal with it
-EP1OUT_BUF		equ	EP0IN_BUF+EP0_BUF_SIZE
-EP1IN_BUF		equ	EP1OUT_BUF+EP1_BUF_SIZE
-EP2IN_BUF		equ	EP1IN_BUF+EP1_BUF_SIZE
+BANKED_EP0OUT_BUF	equ	BANKED_EP3OUT
+BANKED_EP0IN_BUF	equ	BANKED_EP0OUT_BUF+EP0_BUF_SIZE
+GET_CONFIG_BUF		equ	BANKED_EP0IN_BUF+EP0_BUF_SIZE	; response buffer for Get Configuration
+LINEAR_GET_CONFIG_BUF	equ	EP0IN_BUF+EP0_BUF_SIZE
 
+EP1IN_BUF		equ	EP0IN_BUF+EP0_BUF_SIZE+1
+BANKED_EP1IN_BUF	equ	GET_CONFIG_BUF+1
 
-;;; Variables
-RESERVED_RAM		equ	BANKED_BUF_START
-USB_STATE		equ	RESERVED_RAM+0
-EP0_DATA_IN_PTRL	equ	RESERVED_RAM+1	; pointer to block of data to be sent
-EP0_DATA_IN_PTRH	equ	RESERVED_RAM+2	;   in the current EP0 IN transaction
-EP0_DATA_IN_COUNT	equ	RESERVED_RAM+3	; remaining bytes to be sent
-GET_CONFIG_BUF		equ	RESERVED_RAM+4	; response buffer for Get Configuration
+EP1OUT_BUF		equ	EP1IN_BUF+1	; only use 1 byte for EP1 IN
+BANKED_EP1OUT_BUF	equ	BANKED_EP1IN_BUF+1
 
-LINEAR_GET_CONFIG_BUF	equ	0x2000+(GET_CONFIG_BUF-0x20)
 
 ; USB_STATE bit flags
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
