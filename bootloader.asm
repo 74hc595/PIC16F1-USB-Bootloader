@@ -770,24 +770,12 @@ _arm_cdc_eps
 	; initialize EP2 IN buffer
 	; we never send notifications, so keep the count set to 0)
 	clrf	BANKED_EP2IN_CNT
-;	movlw	low EP2IN_BUF	; set ADRL
-;	movwf	BANKED_EP2IN_ADRL
-;	movlw	EP2IN_BUF>>8	; set ADRH
-;	movwf	BANKED_EP2IN_ADRH
-	; set STAT values for all buffers and arm them
-;	movlw	_DAT0;		; no data toggle, aint nobody got time for that
-	clrf	BANKED_EP1OUT_STAT
-;	movwf	BANKED_EP1IN_STAT
-	;movwf	BANKED_EP2IN_STAT
-	;bsf	BANKED_EP2IN_STAT,UOWN
+	clrf	BANKED_EP1OUT_STAT	; no data toggle
 	bsf	BANKED_EP1OUT_STAT,UOWN
+	clrw	
 _arm_ep1_in
-	movlw	1
-	movwf	BANKED_EP1IN_CNT
-	movlw	(1<<DTS)
-	andwf	BANKED_EP1IN_STAT,f	; clear all bits except DTS
-	bsf	BANKED_EP1IN_STAT,DTSEN	; enable DTS checking
-	xorwf	BANKED_EP1IN_STAT,f	; update data toggle
+	andwf	BANKED_EP1IN_STAT,f	; clear all bits (except DTS if bit is set in W)
+	xorwf	BANKED_EP1IN_STAT,f	; update data toggle (if bit is set in W)
 	bsf	BANKED_EP1IN_STAT,UOWN
 	return
 
@@ -798,6 +786,7 @@ _arm_ep1_in
 ;;; returns:	none
 ;;; clobbers:	none
 usb_service_cdc
+	movlw	(1<<DTS)
 	retbfs	FSR1H,ENDP1		; ignore endpoint 2
 	banksel	BANKED_EP1IN_CNT
 	bbfs	FSR1H,DIR,_arm_ep1_in	; if endpoint 1 IN, rearm buffer
