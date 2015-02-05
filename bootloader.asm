@@ -352,12 +352,11 @@ _usb_ctrl_complete
 	lbnksel	BANKED_EP0IN
 	movlw	_DAT0|_DTSEN|_BSTALL
 	movwf	BANKED_EP0IN_STAT	; stall the EP0 IN endpoint
-	bsf	BANKED_EP0IN_STAT,UOWN	; and arm it
+	movwf	BANKED_EP0OUT_STAT	; stall the EP0 OUT endpoint
 	movlw	EP0_BUF_SIZE
 	movwf	BANKED_EP0OUT_CNT
-	movlw	_DAT0|_DTSEN|_BSTALL
-	movwf	BANKED_EP0OUT_STAT	; stall the OUT endpoint
-	bsf	BANKED_EP0OUT_STAT,UOWN	; and arm it
+	bsf	BANKED_EP0IN_STAT,UOWN	; arm the IN and OUT endpoints
+	bsf	BANKED_EP0OUT_STAT,UOWN
 	return
 
 _cvalid	bcf	USB_STATE,EP0_HANDLED	; clear for next transaction
