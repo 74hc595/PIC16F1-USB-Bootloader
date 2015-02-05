@@ -716,24 +716,20 @@ _bcdone	movfw	FSR0L
 	mlogf	BANKED_EP0IN_CNT
 	mlogch	']',0
 	mloghex	8,LOG_SPACE|LOG_NEWLINE
-	mlogf	0x6d;BANKED_EP0IN_BUF+0
-	mlogf	0x6e;BANKED_EP0IN_BUF+1
-	mlogf	0x6f;BANKED_EP0IN_BUF+2
-	mlogf	0xa0;BANKED_EP0IN_BUF+3
-	mlogf	0xa1;BANKED_EP0IN_BUF+4
-	mlogf	0xa2;BANKED_EP0IN_BUF+5
-	mlogf	0xa3;BANKED_EP0IN_BUF+6
-	mlogf	0xa4;BANKED_EP0IN_BUF+7
+	mlogf	BANKED_EP0IN_BUF+0
+	mlogf	BANKED_EP0IN_BUF+1
+	mlogf	BANKED_EP0IN_BUF+2
+	mlogf	BANKED_EP0IN_BUF+3
+	mlogf	BANKED_EP0IN_BUF+4
+	mlogf	BANKED_EP0IN_BUF+5
+	mlogf	BANKED_EP0IN_BUF+6
+	mlogf	BANKED_EP0IN_BUF+7
 	lbnksel	USB_STATE
 	return
 	if LOGGING_ENABLED
 _nodata	mlogch	' ',LOG_NEWLINE
 	lbnksel	USB_STATE
 	return
-	endif
-
-	if LOGGING_ENABLED
-	include "log.asm"
 	endif
 
 
@@ -763,9 +759,6 @@ _arm_cdc_eps
 	movwf	BANKED_EP1IN_ADRL
 	movlw	EP1IN_BUF>>8	; set ADRH
 	movwf	BANKED_EP1IN_ADRH
-	ldfsr0	EP1IN_BUF
-	movlw	'M'
-	movwi	FSR0
 	; initialize EP2 IN buffer
 	; we never send notifications, so keep the count set to 0)
 	clrf	BANKED_EP2IN_CNT
@@ -793,11 +786,14 @@ usb_service_cdc
 _cdc_ep1_out
 	movlw	1			; send a 1 character response
 	movwf	BANKED_EP1IN_CNT
+	movfw	BANKED_EP1OUT_BUF	; copy the first received character to the IN buffer
+	andlw	b'00011111'		; but fix the upper the 3 bits to 010
+	iorlw	b'01000000'
+	movwf	BANKED_EP1IN_BUF	; so it will be echoed back
 	mlogch	'%',0
 	mloghex	2,LOG_SPACE|LOG_NEWLINE
-	mlogf	BANKED_EP1OUT_CNT
-	ldfsr1	EP1OUT_BUF
-	mlogf	INDF1
+	mlogf	BANKED_EP1OUT_CNT	; echo the character count
+	mlogf	BANKED_EP1OUT_BUF	; echo the first character
 	mlogend
 	banksel	BANKED_EP1OUT_STAT
 	movlw	EP1_BUF_SIZE		; reset buffer size
@@ -805,6 +801,12 @@ _cdc_ep1_out
 	clrf	BANKED_EP1OUT_STAT	; ignore data toggle
 	bsf	BANKED_EP1OUT_STAT,UOWN	; rearm OUT buffer
 	return
+
+
+;;; Includes
+	if LOGGING_ENABLED
+	include "log.asm"
+	endif
 
 
 
