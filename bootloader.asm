@@ -55,6 +55,7 @@ BANKED_EP1IN_BUF	equ	GET_CONFIG_BUF+1
 EP1OUT_BUF		equ	EP1IN_BUF+1	; only use 1 byte for EP1 IN
 BANKED_EP1OUT_BUF	equ	BANKED_EP1IN_BUF+1
 
+USED_RAM_LEN		equ	EP1OUT_BUF+EP1_BUF_SIZE-BDT_START
 
 ; USB_STATE bit flags
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
@@ -240,12 +241,6 @@ loop
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_init
 	logch	'R',LOG_NEWLINE
-; clear our state
-	banksel	USB_STATE
-	clrf	USB_STATE
-	clrf	EP0_DATA_IN_PTRL
-	clrf	EP0_DATA_IN_PTRH
-	clrf	EP0_DATA_IN_COUNT
 ; disable USB interrupts
 	banksel	PIE2
 	bcf	PIE2,USBIE
@@ -269,14 +264,14 @@ usb_init
 	movwf	UEIE		; enable all error interrupts
 	movlw	(1<<IDLEIE)|(1<<TRNIE)|(1<<UERRIE)|(1<<URSTIE)
 	movwf	UIE		; all interrupts except stall, SOF, and Bus Activity Detect
-; clear all BDT entries
+; clear all BDT entries, variables, and buffers
 	ldfsr0d	BDT_START
-	movlw	BDT_LEN
+	movlw	USED_RAM_LEN
 	movwf	FSR1H		; loop count
 	movlw	0
-_bdtclr	movwi	FSR0++
+_ramclr	movwi	FSR0++
 	decfsz	FSR1H,f
-	goto	_bdtclr
+	goto	_ramclr
 ; reset ping-pong buffers and address
 	bsf	UCON,PPBRST
 	clrf	UADDR
@@ -349,6 +344,7 @@ usb_service
 _uidle	btfsc	UIR,IDLEIF
 	bcf	UIR,IDLEIF
 ; error?
+	if LOGGING_ENABLED
 	btfss	UIR,UERRIF
 	goto	_utrans
 	mlog
@@ -357,6 +353,9 @@ _uidle	btfsc	UIR,IDLEIF
 	mlogf	UEIR
 	mlogend
 	lbnksel	UEIR
+	else
+	btfsc	UIR,UERRIF
+	endif
 	clrf	UEIR		; clear error flags
 ; service transactions
 _utrans	btfss	UIR,TRNIF
@@ -631,8 +630,6 @@ _usb_ctrl_out
 	bsf	BANKED_EP0OUT_STAT,UOWN
 	return
 
-
-
 ; Handles an IN control transfer on endpoint 0.
 ; BSR=0
 _usb_ctrl_in
@@ -646,9 +643,6 @@ _usb_ctrl_in
 	btfss	BANKED_EP0IN_STAT,DTS	; toggle DTS
 	bsf	WREG,DTS
 	goto	_armin			; arm the IN buffer
-	;movwf	BANKED_EP0IN_STAT
-	;bsf	BANKED_EP0IN_STAT,UOWN	; arm IN buffer
-	;return
 	
 ; if this is the status stage of a Set Address request, assign the address here.
 ; The OUT buffer has already been armed for the next SETUP.
@@ -747,29 +741,39 @@ cdc_init
 	movwf	UEP2
 _arm_cdc_eps
 	banksel	BANKED_EP1OUT
-	; initialize EP1 OUT buffer
-	movlw	EP1_BUF_SIZE	; set CNT
-	movwf	BANKED_EP1OUT_CNT
+	; initialize EP1 OUT buffer address
 	movlw	low EP1OUT_BUF	; set ADRL
 	movwf	BANKED_EP1OUT_ADRL
 	movlw	EP1OUT_BUF>>8	; set ADRH
 	movwf	BANKED_EP1OUT_ADRH
-	; initialize EP1 IN buffer
-	movlw	low EP1IN_BUF	; set ADRL, CNT gets set in _arm_ep1_in
+	; initialize EP1 IN buffer address
+	movlw	low EP1IN_BUF	; set ADRL
 	movwf	BANKED_EP1IN_ADRL
 	movlw	EP1IN_BUF>>8	; set ADRH
 	movwf	BANKED_EP1IN_ADRH
-	; initialize EP2 IN buffer
-	; we never send notifications, so keep the count set to 0)
+	; initialize EP2 IN buffer count to 0
+	; we never send notifications, so keep the count set to 0
+	; since we never arm this buffer, all requests to EP2 IN will NAK
 	clrf	BANKED_EP2IN_CNT
-	clrf	BANKED_EP1OUT_STAT	; no data toggle
-	bsf	BANKED_EP1OUT_STAT,UOWN
-	clrw	
+	; arm EP1 OUT buffer
+	call	_arm_ep1_out
+	; arm EP1 IN buffer, clearing data toggle bit
+	clrw
+
+; arms endpoint 1 IN, toggling DTS if W=(1<<DTS)
 _arm_ep1_in
 	clrf	BANKED_EP1IN_CNT	; next packet will have 0 length (unless another OUT is received)
 	andwf	BANKED_EP1IN_STAT,f	; clear all bits (except DTS if bit is set in W)
 	xorwf	BANKED_EP1IN_STAT,f	; update data toggle (if bit is set in W)
 	bsf	BANKED_EP1IN_STAT,UOWN
+	return
+
+; arms endpoint 1 OUT
+_arm_ep1_out
+	movlw	EP1_BUF_SIZE		; set CNT
+	movwf	BANKED_EP1OUT_CNT
+	clrf	BANKED_EP1OUT_STAT	; ignore data toggle
+	bsf	BANKED_EP1OUT_STAT,UOWN	; rearm OUT buffer
 	return
 
 
@@ -795,12 +799,9 @@ _cdc_ep1_out
 	mlogf	BANKED_EP1OUT_CNT	; echo the character count
 	mlogf	BANKED_EP1OUT_BUF	; echo the first character
 	mlogend
-	banksel	BANKED_EP1OUT_STAT
-	movlw	EP1_BUF_SIZE		; reset buffer size
-	movwf	BANKED_EP1OUT_CNT
-	clrf	BANKED_EP1OUT_STAT	; ignore data toggle
-	bsf	BANKED_EP1OUT_STAT,UOWN	; rearm OUT buffer
-	return
+	lbnksel	BANKED_EP1OUT_STAT
+	goto	_arm_ep1_out
+
 
 
 ;;; Includes
