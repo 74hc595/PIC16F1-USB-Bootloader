@@ -132,6 +132,30 @@ retnz	macro
 	return
 	endm
 
+;;; Return if bit in file is set.
+retbfs	macro	f,b
+	btfsc	f,b
+	return
+	endm
+
+;;; Return if bit in file is clear.
+retbfc	macro	f,b
+	btfss	f,b
+	return
+	endm
+
+;;; Branch to label if bit in file is set.
+bbfs	macro	f,b,label
+	btfsc	f,b
+	goto	label
+	endm
+
+;;; Branch to label if bit in file is clear.
+bbfc	macro	f,b,label
+	btfss	f,b
+	goto	label
+	endm
+
 ;;; Subtracts the literal from W. (opposite of 'sublw')
 subwl	macro	x
 	addlw	256-x
@@ -734,25 +758,36 @@ _arm_cdc_eps
 	movlw	EP1OUT_BUF>>8	; set ADRH
 	movwf	BANKED_EP1OUT_ADRH
 	; initialize EP1 IN buffer
-	clrf	BANKED_EP1IN_CNT
+	movlw	1
+	movwf	BANKED_EP1IN_CNT
 	movlw	low EP1IN_BUF	; set ADRL
 	movwf	BANKED_EP1IN_ADRL
 	movlw	EP1IN_BUF>>8	; set ADRH
 	movwf	BANKED_EP1IN_ADRH
+	ldfsr0	EP1IN_BUF
+	movlw	'M'
+	movwi	FSR0
 	; initialize EP2 IN buffer
+	; we never send notifications, so keep the count set to 0)
 	clrf	BANKED_EP2IN_CNT
-	movlw	low EP2IN_BUF	; set ADRL
-	movwf	BANKED_EP2IN_ADRL
-	movlw	EP2IN_BUF>>8	; set ADRH
-	movwf	BANKED_EP2IN_ADRH
+;	movlw	low EP2IN_BUF	; set ADRL
+;	movwf	BANKED_EP2IN_ADRL
+;	movlw	EP2IN_BUF>>8	; set ADRH
+;	movwf	BANKED_EP2IN_ADRH
 	; set STAT values for all buffers and arm them
-	movlw	_DAT0;		; no data toggle, aint nobody got time for that
-	movwf	BANKED_EP1OUT_STAT
-	movwf	BANKED_EP1IN_STAT
-	movwf	BANKED_EP2IN_STAT
-	bsf	BANKED_EP2IN_STAT,UOWN
-_arm_ep1_out
+;	movlw	_DAT0;		; no data toggle, aint nobody got time for that
+	clrf	BANKED_EP1OUT_STAT
+;	movwf	BANKED_EP1IN_STAT
+	;movwf	BANKED_EP2IN_STAT
+	;bsf	BANKED_EP2IN_STAT,UOWN
 	bsf	BANKED_EP1OUT_STAT,UOWN
+_arm_ep1_in
+	movlw	1
+	movwf	BANKED_EP1IN_CNT
+	movlw	(1<<DTS)
+	andwf	BANKED_EP1IN_STAT,f	; clear all bits except DTS
+	bsf	BANKED_EP1IN_STAT,DTSEN	; enable DTS checking
+	xorwf	BANKED_EP1IN_STAT,f	; update data toggle
 	bsf	BANKED_EP1IN_STAT,UOWN
 	return
 
@@ -763,21 +798,22 @@ _arm_ep1_out
 ;;; returns:	none
 ;;; clobbers:	none
 usb_service_cdc
-	; TODO
-	; 0x0C - 0b0 0001 1 00	; endpoint 1 IN
-	; 0x08 - 0b0 0001 0 00	; endpoint 1 OUT
-	; 0x14 - 0b0 0010 1 00	; endpoint 2 IN
-	movlw	0x08		; check if it's on 1 OUT
-	subwf	FSR1H,w
-	bnz	_arm_cdc_eps	; ignore request, just rearm buffers
-	mlog
+	retbfs	FSR1H,ENDP1		; ignore endpoint 2
+	banksel	BANKED_EP1IN_CNT
+	bbfs	FSR1H,DIR,_arm_ep1_in	; if endpoint 1 IN, rearm buffer
+_cdc_ep1_out
 	mlogch	'%',0
-	mloghex 2,LOG_SPACE|LOG_NEWLINE
+	mloghex	2,LOG_SPACE|LOG_NEWLINE
 	mlogf	BANKED_EP1OUT_CNT
 	ldfsr1	EP1OUT_BUF
 	mlogf	INDF1
 	mlogend
-	goto	_arm_ep1_out
+	banksel	BANKED_EP1OUT_STAT
+	movlw	EP1_BUF_SIZE		; reset buffer size
+	movwf	BANKED_EP1OUT_CNT
+	clrf	BANKED_EP1OUT_STAT	; ignore data toggle
+	bsf	BANKED_EP1OUT_STAT,UOWN	; rearm OUT buffer
+	return
 
 
 
@@ -851,7 +887,7 @@ ENDPOINT_DESCRIPTOR_2_IN
 	dt	0x82		; bEndpointAddress (2 IN)
 	dt	0x03		; bmAttributes (transfer type: interrupt)
 	dt	0x08, 0x00	; wMaxPacketSize (8)
-	dt	0x02		; bInterval
+	dt	0x7f		; bInterval
 
 INTERFACE_DESCRIPTOR_1
 	dt	0x09		; bLength
