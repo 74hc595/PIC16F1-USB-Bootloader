@@ -1,10 +1,6 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
-; USB Mass Storage Bootloader for PIC16(L)F1454/5/9
-;
-; Notes on function calls:
-; FSR0L, FSR0H, FSR1L, and FSR1H are used to pass additional arguments
-; to functions, and may be used as scratch registers inside of functions.
+; USB 512-Word CDC Bootloader for PIC16(L)F1454/5/9
 
 LOGGING_ENABLED		equ	1
 USE_STRING_DESCRIPTORS	equ	0
@@ -114,7 +110,6 @@ _utrans	btfss	UIR,TRNIF
 	bcf	UIR,TRNIF	; clear flag and advance USTAT fifo
 	andlw	b'01111000'	; check endpoint number
 	bnz	_ucdc		; if not endpoint 0, it's a CDC message
-	movfw	FSR1H		; bring original USTAT value back to W
 	call	usb_service_ep0	; handle the control message
 	goto	_utrans
 ; clear USB interrupt
@@ -127,19 +122,21 @@ _ucdc	call	usb_service_cdc	; USTAT value is still in FSR1H
 
 
 
-;;; Handles a control transfer on endpoint 0.
-;;; arguments:	USTAT value in W
-;;; returns:	none
-;;; clobbers:	W, BSR, FSR0
+; Handles a control transfer on endpoint 0.
+; expects USTAT value in FSR1H
 usb_service_ep0
 	banksel	BANKED_EP0OUT_STAT
-	btfsc	WREG,DIR	; is it an IN transfer or an OUT/SETUP?
+	btfsc	FSR1H,DIR	; is it an IN transfer or an OUT/SETUP?
 	goto	_usb_ctrl_in
 ; it's an OUT or SETUP transfer
 	movfw	BANKED_EP0OUT_STAT
 	andlw	b'00111100'	; isolate PID bits
 	sublw	PID_SETUP	; is it a SETUP packet?
+	if LOGGING_ENABLED
 	bnz	_usb_ctrl_out	; if not, it's a regular OUT
+	else
+	bnz	_armout		; if not, it's a regular OUT, just rearm the buffer
+	endif
 	; it's a SETUP packet--fall through
 
 
@@ -209,11 +206,12 @@ _usb_ctrl_complete
 	lbnksel	BANKED_EP0IN
 	movlw	_DAT0|_DTSEN|_BSTALL
 	movwf	BANKED_EP0IN_STAT	; stall the EP0 IN endpoint
-	movwf	BANKED_EP0OUT_STAT	; stall the EP0 OUT endpoint
-	movlw	EP0_BUF_SIZE
+	bsf	BANKED_EP0IN_STAT,UOWN	; arm the IN endpoint
+_armout	movlw	_DAT0|_DTSEN|_BSTALL
+	movwf	BANKED_EP0OUT_STAT
+	movlw	EP0_BUF_SIZE		; reset the buffer count
 	movwf	BANKED_EP0OUT_CNT
-	bsf	BANKED_EP0IN_STAT,UOWN	; arm the IN and OUT endpoints
-	bsf	BANKED_EP0OUT_STAT,UOWN
+	bsf	BANKED_EP0OUT_STAT,UOWN	; arm the OUT endpoint
 	return
 
 _cvalid	bcf	USB_STATE,EP0_HANDLED	; clear for next transaction
@@ -363,6 +361,7 @@ _usb_get_configuration
 	bsf	USB_STATE,EP0_HANDLED
 	goto	_usb_ctrl_complete
 
+	if LOGGING_ENABLED
 ; Handles an OUT control transfer on endpoint 0.
 ; BSR=0
 _usb_ctrl_out
@@ -371,12 +370,8 @@ _usb_ctrl_out
 ; Only time this will get called is in the status stage of a control read,
 ; since we don't support any control writes with a data stage.
 ; All we have to do is re-arm the OUT endpoint.
-	movlw	EP0_BUF_SIZE
-	movwf	BANKED_EP0OUT_CNT
-	movlw	_DAT0|_DTSEN|_BSTALL
-	movwf	BANKED_EP0OUT_STAT
-	bsf	BANKED_EP0OUT_STAT,UOWN
-	return
+	goto	_armout
+	endif
 
 ; Handles an IN control transfer on endpoint 0.
 ; BSR=0
@@ -513,7 +508,7 @@ _arm_ep1_out
 ;;; Services a transaction on one of the CDC endpoints.
 ;;; arguments:	USTAT value in FSR1H
 ;;; returns:	none
-;;; clobbers:	none
+;;; clobbers:	W, BSR, FSR0, FSR1
 usb_service_cdc
 	movlw	(1<<DTS)
 	retbfs	FSR1H,ENDP1		; ignore endpoint 2
@@ -631,9 +626,10 @@ _tflush	btfss	UIR,TRNIF
 	bcf	UIR,TRNIF
 	call	ret		; need at least 6 cycles before checking TRNIF again
 	goto	_tflush
-; initialize endpoint buffers
+; initialize endpoint 0
 _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	UEP0
+; initialize endpoint buffers and counts
 	banksel	BANKED_EP0OUT
 	movlw	EP0_BUF_SIZE	; set endpoint 0 OUT count
 	movwf	BANKED_EP0OUT_CNT
