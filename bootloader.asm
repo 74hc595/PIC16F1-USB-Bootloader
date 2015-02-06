@@ -107,11 +107,13 @@ _uidle	btfsc	UIR,IDLEIF
 	endif
 	clrf	UEIR		; clear error flags
 ; service transactions
-_utrans	btfss	UIR,TRNIF
+_utrans	banksel	UIR
+	btfss	UIR,TRNIF
 	goto	_usdone
 	movfw	USTAT		; stash the status in a temp register
 	movwf	FSR1H
 	bcf	UIR,TRNIF	; clear flag and advance USTAT fifo
+	banksel	BANKED_EP0OUT_STAT
 	andlw	b'01111000'	; check endpoint number
 	bnz	_ucdc		; if not endpoint 0, it's a CDC message
 	call	usb_service_ep0	; handle the control message
@@ -121,15 +123,16 @@ _usdone	banksel	PIR2
 	bcf	PIR2,USBIF
 	retfie
 _ucdc	call	usb_service_cdc	; USTAT value is still in FSR1H
-	banksel	UIR
 	goto	_utrans
 
 
 
-; Handles a control transfer on endpoint 0.
-; expects USTAT value in FSR1H
+;;; Handles a control transfer on endpoint 0.
+;;; arguments:	expects USTAT value in FSR1H
+;;;		BSR=0
+;;; returns:	none
+;;; clobbers:	W, FSR1H
 usb_service_ep0
-	banksel	BANKED_EP0OUT_STAT
 	btfsc	FSR1H,DIR	; is it an IN transfer or an OUT/SETUP?
 	goto	_usb_ctrl_in
 ; it's an OUT or SETUP transfer
@@ -150,8 +153,6 @@ usb_service_ep0
 ;;; returns:	none
 ;;; clobbers:
 _usb_ctrl_setup
-; ensure the OUT endpoint isn't armed
-	bcf	BANKED_EP0OUT_STAT,UOWN	; take ownership of EP0 OUT buffer
 	bcf	USB_STATE,IS_CONTROL_WRITE
 ; get bmRequestType
 	movfw	BANKED_EP0OUT_BUF+bmRequestType
@@ -509,12 +510,12 @@ arm_ep1_out
 
 ;;; Services a transaction on one of the CDC endpoints.
 ;;; arguments:	USTAT value in FSR1H
+;;;		BSR=0
 ;;; returns:	none
-;;; clobbers:	W, BSR, FSR0, FSR1
+;;; clobbers:	W, FSR0, FSR1
 usb_service_cdc
 	movlw	(1<<DTS)
 	retbfs	FSR1H,ENDP1		; ignore endpoint 2
-	banksel	BANKED_EP1IN_CNT
 	bbfs	FSR1H,DIR,arm_ep1_in	; if endpoint 1 IN, rearm buffer
 _cdc_ep1_out
 	movlw	1			; send a 1 character response
