@@ -68,9 +68,8 @@ USED_RAM_LEN		equ	EP1OUT_BUF+EP1_BUF_SIZE-BDT_START
 
 ; USB_STATE bit flags
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
-EP0_HANDLED		equ	1	; last endpoint 0 transaction was handled; will stall if 0
-ADDRESS_PENDING		equ	2	; need to set address in next IN transaction
-DEVICE_CONFIGURED	equ	3	; the device is configured
+ADDRESS_PENDING		equ	1	; need to set address in next IN transaction
+DEVICE_CONFIGURED	equ	2	; the device is configured
 
 
 
@@ -198,20 +197,17 @@ _unhreq	mlog
 	mloghex	1,LOG_NEWLINE
 	mlogf	BANKED_EP0OUT_BUF+bRequest
 	mlogend
+	; fall through to _usb_ctrl_invalid
 
-; Finishes a SETUP transaction.
-_usb_ctrl_complete
+; Finishes a rejected SETUP transaction: the endpoints are stalled
+_usb_ctrl_invalid
 	banksel	UCON
 	bcf	UCON,PKTDIS	; reenable packet processing
-; if the request wasn't handled, stall
 	banksel	USB_STATE
-	btfsc	USB_STATE,EP0_HANDLED
-	goto	_cvalid
 	logch	'X',LOG_NEWLINE
 	lbnksel	BANKED_EP0IN
 	movlw	_DAT0|_DTSEN|_BSTALL
 	call	arm_ep0_in_with_flags
-
 arm_ep0_out
 	movlw	_DAT0|_DTSEN|_BSTALL
 arm_ep0_out_with_flags			; W specifies STAT flags
@@ -221,7 +217,11 @@ arm_ep0_out_with_flags			; W specifies STAT flags
 	bsf	BANKED_EP0OUT_STAT,UOWN	; arm the OUT endpoint
 	return
 
-_cvalid	bcf	USB_STATE,EP0_HANDLED	; clear for next transaction
+; Finishes a successful SETUP transaction.
+_usb_ctrl_complete
+	banksel	UCON
+	bcf	UCON,PKTDIS		; reenable packet processing
+	banksel	USB_STATE
 	btfsc	USB_STATE,IS_CONTROL_WRITE
 	goto	_cwrite
 ; this is a control read; prepare the IN endpoint for the data stage
@@ -235,7 +235,6 @@ arm_ep0_in_with_flags			; W specifies STAT flags
 	movwf	BANKED_EP0IN_STAT
 	bsf	BANKED_EP0IN_STAT,UOWN
 	return
-
 ; this is a control write: prepare the IN endpoint for the status stage
 ; and the OUT endpoint for the next SETUP transaction
 _cwrite	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
@@ -243,10 +242,10 @@ _cwrite	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
 	goto	_armbfs			; arm OUT and IN buffers
 
 
+
 ; Handles a Get Descriptor request.
 ; BSR=0
 _usb_get_descriptor
-	bsf	USB_STATE,EP0_HANDLED	; assume it'll be a valid request
 ; check descriptor type
 	movlw	DESC_DEVICE
 	subwf	BANKED_EP0OUT_BUF+wValueH,w
@@ -260,7 +259,6 @@ _usb_get_descriptor
 	bz	_string_descriptor
 	endif
 ; unsupported descriptor type
-	bcf	USB_STATE,EP0_HANDLED
 	mlog
 	mlogch	'?',0
 	mlogch	'D',0
@@ -268,7 +266,7 @@ _usb_get_descriptor
 	mlogf	BANKED_EP0OUT_BUF+wValueH
 	mlogend
 	lbnksel	BANKED_EP0OUT_BUF
-	goto	_usb_ctrl_complete
+	goto	_usb_ctrl_invalid
 _device_descriptor
 	movlw	low DEVICE_DESCRIPTOR
 	movwf	EP0_DATA_IN_PTRL
@@ -308,7 +306,6 @@ _string_descriptor
 	movwf	EP0_DATA_IN_PTRH
 	goto	_adjust_data_in_count
 _invalid_string_descriptor_index
-	bcf	USB_STATE,EP0_HANDLED
 	mlog
 	mlogch	'?',0
 	mlogch	'S',0
@@ -316,7 +313,7 @@ _invalid_string_descriptor_index
 	mlogf	BANKED_EP0OUT_BUF+wValueH
 	mlogend
 	lbnksel	BANKED_EP0OUT_BUF
-	goto	_usb_ctrl_complete
+	goto	_usb_ctrl_invalid
 	endif
 
 ; the count needs to be set to the minimum of the descriptor's length (in W)
@@ -332,7 +329,6 @@ _adjust_data_in_count
 ; The address is actually set in the IN status stage.
 _usb_set_address
 	bsf	USB_STATE,ADDRESS_PENDING	; address will be assigned in the status stage
-	bsf	USB_STATE,EP0_HANDLED
 	goto	_usb_ctrl_complete
 
 ; Handles a Set Configuration request.
@@ -344,7 +340,6 @@ _usb_set_configuration
 	skpz
 	bsf	USB_STATE,DEVICE_CONFIGURED
 	call	cdc_init
-	bsf	USB_STATE,EP0_HANDLED
 	goto	_usb_ctrl_complete
 
 ; Handles a Get Configuration request.
@@ -361,7 +356,6 @@ _usb_get_configuration
 	movwf	EP0_DATA_IN_PTRH
 	movlw	1
 	movwf	EP0_DATA_IN_COUNT
-	bsf	USB_STATE,EP0_HANDLED
 	goto	_usb_ctrl_complete
 
 	if LOGGING_ENABLED
