@@ -76,7 +76,12 @@ DEVICE_CONFIGURED	equ	2	; the device is configured
 ;;; Vectors
 	org	0x0000
 RESET_VECT
+; configure the oscillator (48MHz from INTOSC using 3x PLL)
+	banksel	OSCCON
+	movlw	(1<<SPLLEN)|(1<<SPLLMULT)|(1<<IRCF3)|(1<<IRCF2)|(1<<IRCF1)|(1<<IRCF0)
+	movwf	OSCCON
 	goto	bootloader_start
+
 	org	0x0004
 INTERRUPT_VECT
 	banksel	UIR
@@ -147,10 +152,8 @@ usb_service_ep0
 
 
 
-;;; Handles a SETUP control transfer on endpoint 0.
-;;; arguments:	BSR=0
-;;; returns:	none
-;;; clobbers:
+; Handles a SETUP control transfer on endpoint 0.
+; BSR=0
 _usb_ctrl_setup
 	bcf	USB_STATE,IS_CONTROL_WRITE
 ; get bmRequestType
@@ -530,17 +533,11 @@ _cdc_ep1_out
 
 ;;; Main function
 bootloader_start
-; Configure the oscillator (48MHz from INTOSC using 3x PLL)
-	banksel	OSCCON
-	movlw	(1<<SPLLEN)|(1<<SPLLMULT)|(1<<IRCF3)|(1<<IRCF2)|(1<<IRCF1)|(1<<IRCF0)
-	movwf	OSCCON
-
 ; Wait for the oscillator and PLL to stabilize
-_wait_osc_ready
-	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
+_wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	andwf	OSCSTAT,w
 	sublw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
-	bnz	_wait_osc_ready
+	bnz	_wosc
 
 ; Enable active clock tuning
 	banksel	ACTCON
