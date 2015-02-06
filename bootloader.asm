@@ -80,160 +80,6 @@ RESET_VECT
 	goto	bootloader_start
 	org	0x0004
 INTERRUPT_VECT
-	call	usb_service
-	retfie
-
-
-
-;;; Main function
-	org	0x0006
-bootloader_start
-; Configure the oscillator (48MHz from INTOSC using 3x PLL)
-	banksel	OSCCON
-	movlw	(1<<SPLLEN)|(1<<SPLLMULT)|(1<<IRCF3)|(1<<IRCF2)|(1<<IRCF1)|(1<<IRCF0)
-	movwf	OSCCON
-
-; Wait for the oscillator and PLL to stabilize
-_wait_osc_ready
-	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
-	andwf	OSCSTAT,w
-	sublw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
-	bnz	_wait_osc_ready
-
-; Enable active clock tuning
-	banksel	ACTCON
-	movlw	(1<<ACTSRC)|(1<<ACTEN)
-	movwf	ACTCON		; source = USB
-
-	if LOGGING_ENABLED
-; Enable the UART
-	banksel	SPBRGL
-	movlw	low BAUDVAL	; set baud rate divisor
-	movwf	SPBRGL
-	bsf	TXSTA,BRGH	; high speed
-	bsf	RCSTA,SPEN	; enable serial port
-	bsf	TXSTA,TXEN	; enable transmission
-; Print a power-on character
-	call	log_init
-	logch	'^',LOG_NEWLINE
-	endif
-
-; Initialize USB
-	call	usb_init
-	call	usb_attach
-	bsf	INTCON,GIE	; enable interrupts
-
-; Main loop
-loop	
-	if LOGGING_ENABLED
-; Print any pending characters in the log
-	call	log_service
-	endif
-	goto	loop
-
-
-
-;;; Initializes the USB system and resets all associated registers.
-;;; arguments:	none
-;;; returns:	none
-;;; clobbers:	W, BSR, FSR0, FSR1H
-usb_init
-	logch	'R',LOG_NEWLINE
-; disable USB interrupts
-	banksel	PIE2
-	bcf	PIE2,USBIE
-; clear USB registers
-	banksel	UEIR
-	clrf	UEIR
-	clrf	UIR
-; disable all endpoints
-	clrf	UEP0
-	clrf	UEP1
-	clrf	UEP2
-	clrf	UEP3
-	clrf	UEP4
-	clrf	UEP5
-	clrf	UEP6
-	clrf	UEP7
-; set configuration
-	movlw	(1<<UPUEN)|(1<<FSEN)
-	movwf	UCFG		; enable pullups, full speed, no ping-pong buffering
-	movlw	(1<<BTSEE)|(1<<BTOEE)|(1<<DFN8EE)|(1<<CRC16EE)|(1<<CRC5EE)|(1<<PIDEE)
-	movwf	UEIE		; enable all error interrupts
-	movlw	(1<<IDLEIE)|(1<<TRNIE)|(1<<UERRIE)|(1<<URSTIE)
-	movwf	UIE		; all interrupts except stall, SOF, and Bus Activity Detect
-; clear all BDT entries, variables, and buffers
-	ldfsr0d	BDT_START
-	movlw	USED_RAM_LEN
-	movwf	FSR1H		; loop count
-	movlw	0
-_ramclr	movwi	FSR0++
-	decfsz	FSR1H,f
-	goto	_ramclr
-; reset ping-pong buffers and address
-	bsf	UCON,PPBRST
-	clrf	UADDR
-	bcf	UCON,PKTDIS	; enable packet processing
-	bcf	UCON,PPBRST	; clear ping-pong buffer reset flag
-; flush pending transactions
-_tflush	btfss	UIR,TRNIF
-	goto	_initep
-	bcf	UIR,TRNIF
-	call	ret		; need at least 6 cycles before checking TRNIF again
-	goto	_tflush
-; initialize endpoint buffers
-_initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
-	movwf	UEP0
-	banksel	BANKED_EP0OUT
-	movlw	EP0_BUF_SIZE	; set endpoint 0 OUT count
-	movwf	BANKED_EP0OUT_CNT
-	movlw	low EP0OUT_BUF	; set endpoint 0 OUT address low
-	movwf	BANKED_EP0OUT_ADRL
-	movlw	low EP0IN_BUF	; set endpoint 0 IN address low
-	movwf	BANKED_EP0IN_ADRL
-	movlw	low EP1OUT_BUF	; set endpoint 1 OUT address low
-	movwf	BANKED_EP1OUT_ADRL
-	movlw	low EP1IN_BUF	; set endpoint 1 IN address low
-	movwf	BANKED_EP1IN_ADRL
-	movlw	EPBUF_ADRH	; set all ADRH values
-	movwf	BANKED_EP0OUT_ADRH
-	movwf	BANKED_EP0IN_ADRH
-	movwf	BANKED_EP1OUT_ADRH
-	movwf	BANKED_EP1IN_ADRH
-	movlw	_DAT0|_BSTALL	; set STAT; arm EP0 OUT to receive a SETUP packet
-	movwf	BANKED_EP0OUT_STAT
-	bsf	BANKED_EP0OUT_STAT,UOWN	; give ownership to SIE
-ret	return	
-
-
-
-;;; Enables the USB module.
-;;; Assumes all registers have been properly configured by calling usb_init.
-;;; arguments:	none
-;;; returns:	none
-;;; clobbers:	W, BSR, FSR0
-usb_attach
-	logch	'A',0
-	banksel	UCON		; reset UCON
-	clrf	UCON
-	banksel	PIE2
-	bsf	PIE2,USBIE	; enable USB interrupts
-	bsf	INTCON,PEIE
-	banksel	UCON
-_usben	bsf	UCON,USBEN	; enable USB module and wait until ready
-	btfss	UCON,USBEN
-	goto	_usben
-	logch	'!',LOG_NEWLINE
-	return
-
-
-
-;;; Services the USB bus.
-;;; Should be called from the interrupt handler, or at least every 1ms.
-;;; arguments:	none
-;;; returns:	none
-;;; clobbers:	W, BSR, FSR0, FSR1H
-usb_service
 	banksel	UIR
 ; reset?
 	btfss	UIR,URSTIF
@@ -274,7 +120,7 @@ _utrans	btfss	UIR,TRNIF
 ; clear USB interrupt
 _usdone	banksel	PIR2
 	bcf	PIR2,USBIF
-	return
+	retfie
 _ucdc	call	usb_service_cdc	; USTAT value is still in FSR1H
 	banksel	UIR
 	goto	_utrans
@@ -687,6 +533,148 @@ _cdc_ep1_out
 	mlogend
 	lbnksel	BANKED_EP1OUT_STAT
 	goto	_arm_ep1_out
+
+
+
+;;; Main function
+bootloader_start
+; Configure the oscillator (48MHz from INTOSC using 3x PLL)
+	banksel	OSCCON
+	movlw	(1<<SPLLEN)|(1<<SPLLMULT)|(1<<IRCF3)|(1<<IRCF2)|(1<<IRCF1)|(1<<IRCF0)
+	movwf	OSCCON
+
+; Wait for the oscillator and PLL to stabilize
+_wait_osc_ready
+	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
+	andwf	OSCSTAT,w
+	sublw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
+	bnz	_wait_osc_ready
+
+; Enable active clock tuning
+	banksel	ACTCON
+	movlw	(1<<ACTSRC)|(1<<ACTEN)
+	movwf	ACTCON		; source = USB
+
+	if LOGGING_ENABLED
+; Enable the UART
+	banksel	SPBRGL
+	movlw	low BAUDVAL	; set baud rate divisor
+	movwf	SPBRGL
+	bsf	TXSTA,BRGH	; high speed
+	bsf	RCSTA,SPEN	; enable serial port
+	bsf	TXSTA,TXEN	; enable transmission
+; Print a power-on character
+	call	log_init
+	logch	'^',LOG_NEWLINE
+	endif
+
+; Initialize USB
+	call	usb_init
+	call	usb_attach
+	bsf	INTCON,GIE	; enable interrupts
+
+; Main loop
+loop	
+	if LOGGING_ENABLED
+; Print any pending characters in the log
+	call	log_service
+	endif
+	goto	loop
+
+
+
+;;; Initializes the USB system and resets all associated registers.
+;;; arguments:	none
+;;; returns:	none
+;;; clobbers:	W, BSR, FSR0, FSR1H
+usb_init
+	logch	'R',LOG_NEWLINE
+; disable USB interrupts
+	banksel	PIE2
+	bcf	PIE2,USBIE
+; clear USB registers
+	banksel	UEIR
+	clrf	UEIR
+	clrf	UIR
+; disable all endpoints
+	clrf	UEP0
+	clrf	UEP1
+	clrf	UEP2
+	clrf	UEP3
+	clrf	UEP4
+	clrf	UEP5
+	clrf	UEP6
+	clrf	UEP7
+; set configuration
+	movlw	(1<<UPUEN)|(1<<FSEN)
+	movwf	UCFG		; enable pullups, full speed, no ping-pong buffering
+	movlw	(1<<BTSEE)|(1<<BTOEE)|(1<<DFN8EE)|(1<<CRC16EE)|(1<<CRC5EE)|(1<<PIDEE)
+	movwf	UEIE		; enable all error interrupts
+	movlw	(1<<IDLEIE)|(1<<TRNIE)|(1<<UERRIE)|(1<<URSTIE)
+	movwf	UIE		; all interrupts except stall, SOF, and Bus Activity Detect
+; clear all BDT entries, variables, and buffers
+	ldfsr0d	BDT_START
+	movlw	USED_RAM_LEN
+	movwf	FSR1H		; loop count
+	movlw	0
+_ramclr	movwi	FSR0++
+	decfsz	FSR1H,f
+	goto	_ramclr
+; reset ping-pong buffers and address
+	bsf	UCON,PPBRST
+	clrf	UADDR
+	bcf	UCON,PKTDIS	; enable packet processing
+	bcf	UCON,PPBRST	; clear ping-pong buffer reset flag
+; flush pending transactions
+_tflush	btfss	UIR,TRNIF
+	goto	_initep
+	bcf	UIR,TRNIF
+	call	ret		; need at least 6 cycles before checking TRNIF again
+	goto	_tflush
+; initialize endpoint buffers
+_initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
+	movwf	UEP0
+	banksel	BANKED_EP0OUT
+	movlw	EP0_BUF_SIZE	; set endpoint 0 OUT count
+	movwf	BANKED_EP0OUT_CNT
+	movlw	low EP0OUT_BUF	; set endpoint 0 OUT address low
+	movwf	BANKED_EP0OUT_ADRL
+	movlw	low EP0IN_BUF	; set endpoint 0 IN address low
+	movwf	BANKED_EP0IN_ADRL
+	movlw	low EP1OUT_BUF	; set endpoint 1 OUT address low
+	movwf	BANKED_EP1OUT_ADRL
+	movlw	low EP1IN_BUF	; set endpoint 1 IN address low
+	movwf	BANKED_EP1IN_ADRL
+	movlw	EPBUF_ADRH	; set all ADRH values
+	movwf	BANKED_EP0OUT_ADRH
+	movwf	BANKED_EP0IN_ADRH
+	movwf	BANKED_EP1OUT_ADRH
+	movwf	BANKED_EP1IN_ADRH
+	movlw	_DAT0|_BSTALL	; set STAT; arm EP0 OUT to receive a SETUP packet
+	movwf	BANKED_EP0OUT_STAT
+	bsf	BANKED_EP0OUT_STAT,UOWN	; give ownership to SIE
+ret	return	
+
+
+
+;;; Enables the USB module.
+;;; Assumes all registers have been properly configured by calling usb_init.
+;;; arguments:	none
+;;; returns:	none
+;;; clobbers:	W, BSR, FSR0
+usb_attach
+	logch	'A',0
+	banksel	UCON		; reset UCON
+	clrf	UCON
+	banksel	PIE2
+	bsf	PIE2,USBIE	; enable USB interrupts
+	bsf	INTCON,PEIE
+	banksel	UCON
+_usben	bsf	UCON,USBEN	; enable USB module and wait until ready
+	btfss	UCON,USBEN
+	goto	_usben
+	logch	'!',LOG_NEWLINE
+	return
 
 
 
