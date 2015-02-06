@@ -36,35 +36,34 @@ DEVICE_DESC_LEN		equ	18
 CONFIG_DESC_TOTAL_LEN	equ	67
 
 EP0_BUF_SIZE 		equ	8	; endpoint 0 buffer size
-EP1_BUF_SIZE		equ	64	; endpoint 1 (CDC data) buffer size
+EP1_OUT_BUF_SIZE	equ	64	; endpoint 1 OUT (CDC data) buffer size
+EP1_IN_BUF_SIZE		equ	1	; endpoint 1 IN (CDC data) buffer size (only need 1 byte to return status codes)
 
 ; Since we're only using 5 endpoints, use the BDT area for buffers,
-; and use the 4 bytes normally occupied by the endpoint 2 OUT BD for variables.
+; and use the 4 bytes normally occupied by the EP2 OUT buffer descriptor for variables.
 USB_STATE		equ	BANKED_EP2OUT+0
 EP0_DATA_IN_PTRL	equ	BANKED_EP2OUT+1	; pointer to block of data to be sent
 EP0_DATA_IN_PTRH	equ	BANKED_EP2OUT+2	;   in the current EP0 IN transaction
 EP0_DATA_IN_COUNT	equ	BANKED_EP2OUT+3	; remaining bytes to be sent
 
 EP0OUT_BUF		equ	EP3OUT
+BANKED_EP0OUT_BUF	equ	BANKED_EP3OUT	; buffers go immediately after EP2 IN's buffer descriptor
 EP0IN_BUF		equ	EP0OUT_BUF+EP0_BUF_SIZE
-BANKED_EP0OUT_BUF	equ	BANKED_EP3OUT
 BANKED_EP0IN_BUF	equ	BANKED_EP0OUT_BUF+EP0_BUF_SIZE
-GET_CONFIG_BUF		equ	BANKED_EP0IN_BUF+EP0_BUF_SIZE	; response buffer for Get Configuration
-LINEAR_GET_CONFIG_BUF	equ	EP0IN_BUF+EP0_BUF_SIZE
 
-EP1IN_BUF		equ	EP0IN_BUF+EP0_BUF_SIZE+1
-BANKED_EP1IN_BUF	equ	GET_CONFIG_BUF+1
+EP1IN_BUF		equ	EP0IN_BUF+EP0_BUF_SIZE
+BANKED_EP1IN_BUF	equ	BANKED_EP0IN_BUF+EP0_BUF_SIZE
 
-EP1OUT_BUF		equ	EP1IN_BUF+1	; only use 1 byte for EP1 IN
-BANKED_EP1OUT_BUF	equ	BANKED_EP1IN_BUF+1
+EP1OUT_BUF		equ	EP1IN_BUF+EP1_IN_BUF_SIZE	; only use 1 byte for EP1 IN
+BANKED_EP1OUT_BUF	equ	BANKED_EP1IN_BUF+EP1_IN_BUF_SIZE
 
 ; High byte of all endpoint buffers.
 EPBUF_ADRH		equ	(EP0OUT_BUF>>8)
 	if ((EP0IN_BUF>>8) != (EP0OUT_BUF>>8)) || ((EP1OUT_BUF>>8) != (EP0OUT_BUF>>8)) || ((EP1IN_BUF>>8) != (EP0OUT_BUF>>8))
-	error "Endpoint buffers must be in the same 256-byte region"
+	error "Endpoint buffers must be in the same 256-word region"
 	endif
 
-USED_RAM_LEN		equ	EP1OUT_BUF+EP1_BUF_SIZE-BDT_START
+USED_RAM_LEN		equ	EP1OUT_BUF+EP1_OUT_BUF_SIZE-BDT_START
 
 ; USB_STATE bit flags
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
@@ -346,14 +345,13 @@ _usb_set_configuration
 ; Handles a Get Configuration request.
 ; BSR=0
 _usb_get_configuration
-; Put either 0 or 1 into GET_CONFIG_BUF
-	clrw
+; load a pointer to either a 0 or a 1 in ROM
+; the 0 and 1 have been chosen so that they are adjacent
+	movlw	low CONFIGURATION_0_CONSTANT
 	btfsc	USB_STATE,DEVICE_CONFIGURED
-	incf	GET_CONFIG_BUF,f
-; Seems like overkill for a 1-byte transfer, but it keeps things consistent
-	movlw	low LINEAR_GET_CONFIG_BUF
+	incw
 	movwf	EP0_DATA_IN_PTRL
-	movlw	high LINEAR_GET_CONFIG_BUF
+	movlw	high CONFIGURATION_0_CONSTANT
 	movwf	EP0_DATA_IN_PTRH
 	movlw	1
 	movwf	EP0_DATA_IN_COUNT
@@ -495,7 +493,7 @@ arm_ep1_in
 
 ; arms endpoint 1 OUT
 arm_ep1_out
-	movlw	EP1_BUF_SIZE		; set CNT
+	movlw	EP1_OUT_BUF_SIZE	; set CNT
 	movwf	BANKED_EP1OUT_CNT
 	clrf	BANKED_EP1OUT_STAT	; ignore data toggle
 	bsf	BANKED_EP1OUT_STAT,UOWN	; rearm OUT buffer
@@ -699,12 +697,18 @@ INTERFACE_DESCRIPTOR_0
 	dt	0x09		; bLength
 	dt	0x04		; bDescriptorType (INTERFACE)
 	dt	0x00		; bInterfaceNumber
+CONFIGURATION_0_CONSTANT
 	dt	0x00		; bAlternateSetting
+CONFIGURATION_1_CONSTANT
 	dt	0x01		; bNumEndpoints
 	dt	0x02		; bInterfaceClass (communication)
 	dt	0x02		; bInterfaceSubclass (abstract control model)
 	dt	0x01		; bInterfaceProtocol (V.25ter, common AT commands)
 	dt	0x00		; iInterface
+
+	if (CONFIGURATION_0_CONSTANT>>8) != (CONFIGURATION_1_CONSTANT>>8)
+	error "CONSTANT_0 and CONSTANT_1 must be in the same 256-word region"
+	endif
 
 HEADER_FUNCTIONAL_DESCRIPTOR
 	dt	0x05		; bFunctionLength
