@@ -135,7 +135,7 @@ usb_service_ep0
 	if LOGGING_ENABLED
 	bnz	_usb_ctrl_out	; if not, it's a regular OUT
 	else
-	bnz	_armout		; if not, it's a regular OUT, just rearm the buffer
+	bnz	_arm_ep0_out	; if not, it's a regular OUT, just rearm the buffer
 	endif
 	; it's a SETUP packet--fall through
 
@@ -205,9 +205,11 @@ _usb_ctrl_complete
 	logch	'X',LOG_NEWLINE
 	lbnksel	BANKED_EP0IN
 	movlw	_DAT0|_DTSEN|_BSTALL
-	movwf	BANKED_EP0IN_STAT	; stall the EP0 IN endpoint
-	bsf	BANKED_EP0IN_STAT,UOWN	; arm the IN endpoint
-_armout	movlw	_DAT0|_DTSEN|_BSTALL
+	call	_arm_ep0_in_with_flags
+
+_arm_ep0_out
+	movlw	_DAT0|_DTSEN|_BSTALL
+_arm_ep0_out_with_flags			; W specifies STAT flags
 	movwf	BANKED_EP0OUT_STAT
 	movlw	EP0_BUF_SIZE		; reset the buffer count
 	movwf	BANKED_EP0OUT_CNT
@@ -222,16 +224,12 @@ _cvalid	bcf	USB_STATE,EP0_HANDLED	; clear for next transaction
 _cread	call	ep0_read_in		; read data into IN buffer
 	movlw	_DAT1|_DTSEN		; OUT buffer will be ready for status stage
 ; value in W is used to specify the EP0 OUT flags
-_armbfs	movwf	BANKED_EP0OUT_STAT	; arm OUT buffer
-	movlw	EP0_BUF_SIZE
-	movwf	BANKED_EP0OUT_CNT
-	bsf	BANKED_EP0OUT_STAT,UOWN
+_armbfs	call	_arm_ep0_out_with_flags
 	movlw	_DAT1|_DTSEN		; arm IN buffer
-; value in W is used to specify the EP0 IN flags
-_armin	movwf	BANKED_EP0IN_STAT
+_arm_ep0_in_with_flags			; W specifies STAT flags
+	movwf	BANKED_EP0IN_STAT
 	bsf	BANKED_EP0IN_STAT,UOWN
 	return
-
 
 ; this is a control write: prepare the IN endpoint for the status stage
 ; and the OUT endpoint for the next SETUP transaction
@@ -370,7 +368,7 @@ _usb_ctrl_out
 ; Only time this will get called is in the status stage of a control read,
 ; since we don't support any control writes with a data stage.
 ; All we have to do is re-arm the OUT endpoint.
-	goto	_armout
+	goto	_arm_ep0_out
 	endif
 
 ; Handles an IN control transfer on endpoint 0.
@@ -385,7 +383,7 @@ _usb_ctrl_in
 	movlw	_DTSEN
 	btfss	BANKED_EP0IN_STAT,DTS	; toggle DTS
 	bsf	WREG,DTS
-	goto	_armin			; arm the IN buffer
+	goto	_arm_ep0_in_with_flags	; arm the IN buffer
 	
 ; if this is the status stage of a Set Address request, assign the address here.
 ; The OUT buffer has already been armed for the next SETUP.
@@ -630,9 +628,7 @@ _tflush	btfss	UIR,TRNIF
 _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	UEP0
 ; initialize endpoint buffers and counts
-	banksel	BANKED_EP0OUT
-	movlw	EP0_BUF_SIZE	; set endpoint 0 OUT count
-	movwf	BANKED_EP0OUT_CNT
+	banksel	BANKED_EP0OUT_ADRL
 	movlw	low EP0OUT_BUF	; set endpoint 0 OUT address low
 	movwf	BANKED_EP0OUT_ADRL
 	movlw	low EP0IN_BUF	; set endpoint 0 IN address low
@@ -646,10 +642,7 @@ _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	BANKED_EP0IN_ADRH
 	movwf	BANKED_EP1OUT_ADRH
 	movwf	BANKED_EP1IN_ADRH
-	movlw	_DAT0|_BSTALL	; set STAT; arm EP0 OUT to receive a SETUP packet
-	movwf	BANKED_EP0OUT_STAT
-	bsf	BANKED_EP0OUT_STAT,UOWN	; give ownership to SIE
-ret	return	
+	goto	_arm_ep0_out
 
 
 
@@ -670,7 +663,7 @@ _usben	bsf	UCON,USBEN	; enable USB module and wait until ready
 	btfss	UCON,USBEN
 	goto	_usben
 	logch	'!',LOG_NEWLINE
-	return
+ret	return
 
 
 
