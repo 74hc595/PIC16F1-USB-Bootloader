@@ -58,6 +58,12 @@ BANKED_EP1IN_BUF	equ	GET_CONFIG_BUF+1
 EP1OUT_BUF		equ	EP1IN_BUF+1	; only use 1 byte for EP1 IN
 BANKED_EP1OUT_BUF	equ	BANKED_EP1IN_BUF+1
 
+; High byte of all endpoint buffers.
+EPBUF_ADRH		equ	(EP0OUT_BUF>>8)
+	if ((EP0IN_BUF>>8) != (EP0OUT_BUF>>8)) || ((EP1OUT_BUF>>8) != (EP0OUT_BUF>>8)) || ((EP1IN_BUF>>8) != (EP0OUT_BUF>>8))
+	error "Endpoint buffers must be in the same 256-byte region"
+	endif
+
 USED_RAM_LEN		equ	EP1OUT_BUF+EP1_BUF_SIZE-BDT_START
 
 ; USB_STATE bit flags
@@ -173,26 +179,31 @@ _ramclr	movwi	FSR0++
 _tflush	btfss	UIR,TRNIF
 	goto	_initep
 	bcf	UIR,TRNIF
-	call	_ret		; need at least 6 cycles before checking TRNIF again
+	call	ret		; need at least 6 cycles before checking TRNIF again
 	goto	_tflush
-; initialize endpoint 0
+; initialize endpoint buffers
 _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	UEP0
 	banksel	BANKED_EP0OUT
-	movlw	EP0_BUF_SIZE	; set CNT
+	movlw	EP0_BUF_SIZE	; set endpoint 0 OUT count
 	movwf	BANKED_EP0OUT_CNT
-	movlw	low EP0OUT_BUF	; set ADRL
+	movlw	low EP0OUT_BUF	; set endpoint 0 OUT address low
 	movwf	BANKED_EP0OUT_ADRL
-	movlw	EP0OUT_BUF>>8	; set ADRH
+	movlw	low EP0IN_BUF	; set endpoint 0 IN address low
+	movwf	BANKED_EP0IN_ADRL
+	movlw	low EP1OUT_BUF	; set endpoint 1 OUT address low
+	movwf	BANKED_EP1OUT_ADRL
+	movlw	low EP1IN_BUF	; set endpoint 1 IN address low
+	movwf	BANKED_EP1IN_ADRL
+	movlw	EPBUF_ADRH	; set all ADRH values
 	movwf	BANKED_EP0OUT_ADRH
+	movwf	BANKED_EP0IN_ADRH
+	movwf	BANKED_EP1OUT_ADRH
+	movwf	BANKED_EP1IN_ADRH
 	movlw	_DAT0|_BSTALL	; set STAT; arm EP0 OUT to receive a SETUP packet
 	movwf	BANKED_EP0OUT_STAT
 	bsf	BANKED_EP0OUT_STAT,UOWN	; give ownership to SIE
-	movlw	low EP0IN_BUF	; set IN endpoint ADRL
-	movwf	BANKED_EP0IN_ADRL
-	movlw	EP0IN_BUF>>8	; set IN endpoint ADRH
-	movwf	BANKED_EP0IN_ADRH
-_ret	return	
+ret	return	
 
 
 
@@ -630,23 +641,7 @@ cdc_init
 	movwf	UEP1
 	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPINEN)
 	movwf	UEP2
-_arm_cdc_eps
-	banksel	BANKED_EP1OUT
-	; initialize EP1 OUT buffer address
-	movlw	low EP1OUT_BUF	; set ADRL
-	movwf	BANKED_EP1OUT_ADRL
-	movlw	EP1OUT_BUF>>8	; set ADRH
-	movwf	BANKED_EP1OUT_ADRH
-	; initialize EP1 IN buffer address
-	movlw	low EP1IN_BUF	; set ADRL
-	movwf	BANKED_EP1IN_ADRL
-	movlw	EP1IN_BUF>>8	; set ADRH
-	movwf	BANKED_EP1IN_ADRH
-	; initialize EP2 IN buffer count to 0
-	; we never send notifications, so keep the count set to 0
-	; since we never arm this buffer, all requests to EP2 IN will NAK
-	clrf	BANKED_EP2IN_CNT
-	; arm EP1 OUT buffer
+	banksel	BANKED_EP1OUT_STAT
 	call	_arm_ep1_out
 	; arm EP1 IN buffer, clearing data toggle bit
 	clrw
