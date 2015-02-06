@@ -1,6 +1,10 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
 ; USB 512-Word CDC Bootloader for PIC16(L)F1454/5/9
+;
+; Labels that do not begin with an underscore can be called as functions.
+; Labels that begin with an underscore are not safe to call, they should only
+; be reached via goto.
 
 LOGGING_ENABLED		equ	1
 USE_STRING_DESCRIPTORS	equ	0
@@ -135,7 +139,7 @@ usb_service_ep0
 	if LOGGING_ENABLED
 	bnz	_usb_ctrl_out	; if not, it's a regular OUT
 	else
-	bnz	_arm_ep0_out	; if not, it's a regular OUT, just rearm the buffer
+	bnz	arm_ep0_out	; if not, it's a regular OUT, just rearm the buffer
 	endif
 	; it's a SETUP packet--fall through
 
@@ -205,11 +209,11 @@ _usb_ctrl_complete
 	logch	'X',LOG_NEWLINE
 	lbnksel	BANKED_EP0IN
 	movlw	_DAT0|_DTSEN|_BSTALL
-	call	_arm_ep0_in_with_flags
+	call	arm_ep0_in_with_flags
 
-_arm_ep0_out
+arm_ep0_out
 	movlw	_DAT0|_DTSEN|_BSTALL
-_arm_ep0_out_with_flags			; W specifies STAT flags
+arm_ep0_out_with_flags			; W specifies STAT flags
 	movwf	BANKED_EP0OUT_STAT
 	movlw	EP0_BUF_SIZE		; reset the buffer count
 	movwf	BANKED_EP0OUT_CNT
@@ -224,9 +228,9 @@ _cvalid	bcf	USB_STATE,EP0_HANDLED	; clear for next transaction
 _cread	call	ep0_read_in		; read data into IN buffer
 	movlw	_DAT1|_DTSEN		; OUT buffer will be ready for status stage
 ; value in W is used to specify the EP0 OUT flags
-_armbfs	call	_arm_ep0_out_with_flags
+_armbfs	call	arm_ep0_out_with_flags
 	movlw	_DAT1|_DTSEN		; arm IN buffer
-_arm_ep0_in_with_flags			; W specifies STAT flags
+arm_ep0_in_with_flags			; W specifies STAT flags
 	movwf	BANKED_EP0IN_STAT
 	bsf	BANKED_EP0IN_STAT,UOWN
 	return
@@ -368,7 +372,7 @@ _usb_ctrl_out
 ; Only time this will get called is in the status stage of a control read,
 ; since we don't support any control writes with a data stage.
 ; All we have to do is re-arm the OUT endpoint.
-	goto	_arm_ep0_out
+	goto	arm_ep0_out
 	endif
 
 ; Handles an IN control transfer on endpoint 0.
@@ -383,7 +387,7 @@ _usb_ctrl_in
 	movlw	_DTSEN
 	btfss	BANKED_EP0IN_STAT,DTS	; toggle DTS
 	bsf	WREG,DTS
-	goto	_arm_ep0_in_with_flags	; arm the IN buffer
+	goto	arm_ep0_in_with_flags	; arm the IN buffer
 	
 ; if this is the status stage of a Set Address request, assign the address here.
 ; The OUT buffer has already been armed for the next SETUP.
@@ -481,12 +485,12 @@ cdc_init
 	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPINEN)
 	movwf	UEP2
 	banksel	BANKED_EP1OUT_STAT
-	call	_arm_ep1_out
+	call	arm_ep1_out
 	; arm EP1 IN buffer, clearing data toggle bit
 	clrw
 
 ; arms endpoint 1 IN, toggling DTS if W=(1<<DTS)
-_arm_ep1_in
+arm_ep1_in
 	clrf	BANKED_EP1IN_CNT	; next packet will have 0 length (unless another OUT is received)
 	andwf	BANKED_EP1IN_STAT,f	; clear all bits (except DTS if bit is set in W)
 	xorwf	BANKED_EP1IN_STAT,f	; update data toggle (if bit is set in W)
@@ -494,7 +498,7 @@ _arm_ep1_in
 	return
 
 ; arms endpoint 1 OUT
-_arm_ep1_out
+arm_ep1_out
 	movlw	EP1_BUF_SIZE		; set CNT
 	movwf	BANKED_EP1OUT_CNT
 	clrf	BANKED_EP1OUT_STAT	; ignore data toggle
@@ -511,7 +515,7 @@ usb_service_cdc
 	movlw	(1<<DTS)
 	retbfs	FSR1H,ENDP1		; ignore endpoint 2
 	banksel	BANKED_EP1IN_CNT
-	bbfs	FSR1H,DIR,_arm_ep1_in	; if endpoint 1 IN, rearm buffer
+	bbfs	FSR1H,DIR,arm_ep1_in	; if endpoint 1 IN, rearm buffer
 _cdc_ep1_out
 	movlw	1			; send a 1 character response
 	movwf	BANKED_EP1IN_CNT
@@ -525,7 +529,7 @@ _cdc_ep1_out
 	mlogf	BANKED_EP1OUT_BUF	; echo the first character
 	mlogend
 	lbnksel	BANKED_EP1OUT_STAT
-	goto	_arm_ep1_out
+	goto	arm_ep1_out
 
 
 
@@ -642,7 +646,7 @@ _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	BANKED_EP0IN_ADRH
 	movwf	BANKED_EP1OUT_ADRH
 	movwf	BANKED_EP1IN_ADRH
-	goto	_arm_ep0_out
+	goto	arm_ep0_out
 
 
 
