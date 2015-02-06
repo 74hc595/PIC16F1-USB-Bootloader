@@ -156,13 +156,11 @@ usb_service_ep0
 ; BSR=0
 _usb_ctrl_setup
 	bcf	USB_STATE,IS_CONTROL_WRITE
-; get bmRequestType
+; get bmRequestType, but don't bother checking whether it's standard/class/vendor...
+; the CDC and standard requests we'll receive have distinct bRequest numbers
 	movfw	BANKED_EP0OUT_BUF+bmRequestType
 	btfss	BANKED_EP0OUT_BUF+bmRequestType,7	; is this host->device?
 	bsf	USB_STATE,IS_CONTROL_WRITE		; if so, this is a control write
-	movlw	_REQ_TYPE
-	andwf	BANKED_EP0OUT_BUF+bmRequestType,w
-	bnz	_unhreq			; ignore non-standard requests
 ; print packet
 	mlog
 	mlogch	'P',0
