@@ -82,7 +82,7 @@ def main(args):
             help='the serial port that the PIC is attached to')
     parser.add_argument('-b', '--bootloader-size',
             metavar='SIZE',
-            default=512,
+            default=4096,
             type=int,
             help='size of the bootloader in words, 512 or 4096 (defaults to 512)')
     parser.add_argument('-r', '--rom-size',
@@ -128,7 +128,7 @@ def main(args):
     # open the serial port
     log('Opening serial port '+port)
     try:
-        ser = None # Serial(port, 38400)    # baud doesn't matter
+        ser = Serial(port, 38400)    # baud doesn't matter
     except Exception, e:
         exit_with_error(6, e)
 
@@ -175,7 +175,7 @@ def main(args):
         log('Done.')
 
     log('Closing serial port '+port)
-#    ser.close()
+    ser.close()
 
     if failed:
         exit_with_error(127, 'Programming failed')

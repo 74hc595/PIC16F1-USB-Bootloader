@@ -16,6 +16,7 @@ USE_STRING_DESCRIPTORS	equ	0
 	include "macros.inc"
 	include "bdt.inc"
 	include "usb.inc"
+	include "protocol_constants.inc"
 	include "log_macros.inc"
 	list
 	errorlevel -302
@@ -23,7 +24,7 @@ USE_STRING_DESCRIPTORS	equ	0
 
 ;;; Configuration
 	__config _CONFIG1, _FOSC_INTOSC & _WDTE_OFF & _PWRTE_ON & _MCLRE_ON & _CP_OFF & _BOREN_ON & _IESO_OFF & _FCMEN_OFF
-	__config _CONFIG2, _WRT_OFF & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LVP_OFF
+	__config _CONFIG2, _WRT_HALF & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LVP_OFF
 
 
 
@@ -491,14 +492,6 @@ arm_ep1_in
 	bsf	BANKED_EP1IN_STAT,UOWN
 	return
 
-; arms endpoint 1 OUT
-arm_ep1_out
-	movlw	EP1_OUT_BUF_SIZE	; set CNT
-	movwf	BANKED_EP1OUT_CNT
-	clrf	BANKED_EP1OUT_STAT	; ignore data toggle
-	bsf	BANKED_EP1OUT_STAT,UOWN	; rearm OUT buffer
-	return
-
 
 
 ;;; Services a transaction on one of the CDC endpoints.
@@ -511,19 +504,69 @@ usb_service_cdc
 	retbfs	FSR1H,ENDP1		; ignore endpoint 2
 	bbfs	FSR1H,DIR,arm_ep1_in	; if endpoint 1 IN, rearm buffer
 _cdc_ep1_out
-	movlw	1			; send a 1 character response
-	movwf	BANKED_EP1IN_CNT
-	movfw	BANKED_EP1OUT_BUF	; copy the first received character to the IN buffer
-	andlw	b'00011111'		; but fix the upper the 3 bits to 010
-	iorlw	b'01000000'
-	movwf	BANKED_EP1IN_BUF	; so it will be echoed back
-	mlogch	'%',0
-	mloghex	2,LOG_SPACE|LOG_NEWLINE
-	mlogf	BANKED_EP1OUT_CNT	; echo the character count
-	mlogf	BANKED_EP1OUT_BUF	; echo the first character
-	mlogend
-	lbnksel	BANKED_EP1OUT_STAT
-	goto	arm_ep1_out
+	call	bootloader_exec_cmd	; execute command; status returned in W
+	banksel	BANKED_EP1IN_BUF
+	movwf	BANKED_EP1IN_BUF	; copy status to IN buffer
+	movlw	1
+	movwf	BANKED_EP1IN_CNT	; output byte count is 1
+	; fall through to arm_ep1_out
+arm_ep1_out
+	movlw	EP1_OUT_BUF_SIZE	; set CNT
+	movwf	BANKED_EP1OUT_CNT
+	clrf	BANKED_EP1OUT_STAT	; ignore data toggle
+	bsf	BANKED_EP1OUT_STAT,UOWN	; rearm OUT buffer
+	return
+
+;	movlw	1			; send a 1 character response
+;	movwf	BANKED_EP1IN_CNT
+;	movfw	BANKED_EP1OUT_BUF	; copy the first received character to the IN buffer
+;	andlw	b'00011111'		; but fix the upper the 3 bits to 010
+;	iorlw	b'01000000'
+;	movwf	BANKED_EP1IN_BUF	; so it will be echoed back
+;	mlogch	'%',0
+;	mloghex	2,LOG_SPACE|LOG_NEWLINE
+;	mlogf	BANKED_EP1OUT_CNT	; echo the character count
+;	mlogf	BANKED_EP1OUT_BUF	; echo the first character
+;	mlogend
+;	lbnksel	BANKED_EP1OUT_STAT
+;	goto	arm_ep1_out
+
+
+
+;;; Executes a bootloader command.
+;;; arguments:	command payload in EP1 OUT buffer
+;;; 		BSR=0
+;;; returns:	status code in W
+;;; clobbers:	W, BSR, FSR0, FSR1
+bootloader_exec_cmd
+; check length of data packet
+	movlw	BCMD_SET_PARAMS_LEN
+	subwf	BANKED_EP1OUT_CNT,w
+	bz	_bootloader_set_params
+	movlw	BCMD_WRITE_LEN
+	subwf	BANKED_EP1OUT_CNT,w
+	bz	_bootloader_write
+	movlw	BCMD_RESET_LEN
+	subwf	BANKED_EP1OUT_CNT,w
+	bz	_bootloader_reset
+	retlw	BSTAT_INVALID_COMMAND
+
+; Resets the device if the received byte matches the reset character.
+_bootloader_reset
+	movlw	BCMD_RESET_CHAR
+	subwf	BANKED_EP1OUT_BUF,w	; check received character
+	skpz
+	retlw	BSTAT_INVALID_COMMAND
+; command is valid, reset the device
+	reset
+
+_bootloader_set_params
+	retlw	BSTAT_VERIFY_FAILED
+
+_bootloader_write
+	retlw	BSTAT_INVALID_CHECKSUM
+
+
 
 
 
