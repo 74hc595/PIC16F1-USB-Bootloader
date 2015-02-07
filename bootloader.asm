@@ -503,33 +503,44 @@ usb_service_cdc
 	movlw	(1<<DTS)
 	retbfs	FSR1H,ENDP1		; ignore endpoint 2
 	bbfs	FSR1H,DIR,arm_ep1_in	; if endpoint 1 IN, rearm buffer
-_cdc_ep1_out
+
+	if 0
+	movlw	1			; send a 1 character response
+	movwf	BANKED_EP1IN_CNT
+	movfw	BANKED_EP1OUT_BUF	; copy the first received character to the IN buffer
+	andlw	b'00011111'		; but fix the upper the 3 bits to 010
+	iorlw	b'01000000'
+	movwf	BANKED_EP1IN_BUF	; so it will be echoed back
+	mlogch	'%',0
+	mloghex	2,LOG_SPACE|LOG_NEWLINE
+	mlogf	BANKED_EP1OUT_CNT	; echo the character count
+	mlogf	BANKED_EP1OUT_BUF	; echo the first character
+	mlogend
+	lbnksel	BANKED_EP1OUT_STAT
+	goto	arm_ep1_out
+	endif
+
+	movf	BANKED_EP1OUT_CNT,f	; test for a zero-length packet
+	bz	arm_ep1_out		; (just ignore them and rearm the OUT buffer)
+	bcf	BANKED_EP1IN_STAT,UOWN
 	call	bootloader_exec_cmd	; execute command; status returned in W
 	banksel	BANKED_EP1IN_BUF
 	movwf	BANKED_EP1IN_BUF	; copy status to IN buffer
 	movlw	1
 	movwf	BANKED_EP1IN_CNT	; output byte count is 1
+	mlogch	'&',0
+	mloghex	1,LOG_NEWLINE
+	mlogf	BANKED_EP1IN_BUF
+	lbnksel	BANKED_EP1IN_CNT
+	bsf	BANKED_EP1IN_STAT,UOWN
 	; fall through to arm_ep1_out
+
 arm_ep1_out
 	movlw	EP1_OUT_BUF_SIZE	; set CNT
 	movwf	BANKED_EP1OUT_CNT
 	clrf	BANKED_EP1OUT_STAT	; ignore data toggle
 	bsf	BANKED_EP1OUT_STAT,UOWN	; rearm OUT buffer
 	return
-
-;	movlw	1			; send a 1 character response
-;	movwf	BANKED_EP1IN_CNT
-;	movfw	BANKED_EP1OUT_BUF	; copy the first received character to the IN buffer
-;	andlw	b'00011111'		; but fix the upper the 3 bits to 010
-;	iorlw	b'01000000'
-;	movwf	BANKED_EP1IN_BUF	; so it will be echoed back
-;	mlogch	'%',0
-;	mloghex	2,LOG_SPACE|LOG_NEWLINE
-;	mlogf	BANKED_EP1OUT_CNT	; echo the character count
-;	mlogf	BANKED_EP1OUT_BUF	; echo the first character
-;	mlogend
-;	lbnksel	BANKED_EP1OUT_STAT
-;	goto	arm_ep1_out
 
 
 
@@ -553,18 +564,21 @@ bootloader_exec_cmd
 
 ; Resets the device if the received byte matches the reset character.
 _bootloader_reset
-	movlw	BCMD_RESET_CHAR
-	subwf	BANKED_EP1OUT_BUF,w	; check received character
-	skpz
-	retlw	BSTAT_INVALID_COMMAND
+	retlw	1
+;	movlw	BCMD_RESET_CHAR
+;	subwf	BANKED_EP1OUT_BUF,w	; check received character
+;	skpz
+;	retlw	BSTAT_INVALID_COMMAND
 ; command is valid, reset the device
-	reset
+;	reset
 
 _bootloader_set_params
-	retlw	BSTAT_VERIFY_FAILED
+	retlw	4
+;	retlw	BSTAT_VERIFY_FAILED
 
 _bootloader_write
-	retlw	BSTAT_INVALID_CHECKSUM
+	retlw	64
+;	retlw	BSTAT_INVALID_CHECKSUM
 
 
 

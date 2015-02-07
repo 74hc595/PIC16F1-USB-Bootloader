@@ -8,6 +8,9 @@ PORT_ENV_VAR = 'PICUSBFLASH_PORT'
 CONFIGURATION_WORD_RANGE = range(0x8000*2, 0x8009*2, 2)
 FLASH_ROW_LEN = 32
 
+BCMD_ERASE = 0x45
+BCMD_RESET = 0x52
+
 # Status codes
 STATUS_OK = 1
 STATUS_INVALID_COMMAND = 2
@@ -54,6 +57,7 @@ def device_set_params(ser, wordaddr, checksum=None):
         wordaddr,
         (', checksum of data to be written is 0x%02x' % checksum) if checksum is not None else ''
     ))
+    ser.write(bytearray([low(wordaddr), high(wordaddr), checksum or 0, BCMD_ERASE]))
     return True
 
 def device_write(ser, databytes):
@@ -62,6 +66,7 @@ def device_write(ser, databytes):
 
 def device_reset(ser):
     log('! Resetting device')
+    ser.write(bytearray([3]))
 
 
 
@@ -146,39 +151,53 @@ def main(args):
     ih.padding = 0x3fff
     log('Code range: 0x%04x-0x%04x (%d words)' % (ih.minaddr(), ih.maxaddr(), ih.maxaddr()-ih.minaddr()+1))
 
-    failed = False
-    for wordaddr in range(min_address, max_address, FLASH_ROW_LEN):
-        row_in_range = wordaddr >= ih.minaddr() and wordaddr <= ih.maxaddr()
+#    failed = False
+#    for wordaddr in range(min_address, max_address, FLASH_ROW_LEN):
+#        row_in_range = wordaddr >= ih.minaddr() and wordaddr <= ih.maxaddr()
+#
+#        # compute the row checksum
+#        checksum = None
+#
+#        if row_in_range:
+#            words = ih.tobinarray(wordaddr, size=FLASH_ROW_LEN)
+#            data = reduce(lambda arr,word: arr.extend([low(word), high(word)]) or arr, words, [])
+#            #print [hex(x) for x in data]
+#            checksum = -sum(data) & 0xff    # two's complement of lower 8 bits of sum of bytes
+#
+#        # erase the row
+#        if not device_set_params(ser, wordaddr, checksum):
+#            failed = True
+#            break
+#
+#        # if the row is within the range of the hex file, program the data
+#        if row_in_range:
+#            if not device_write(ser, data):
+#                failed =  True
+#                break
+#
+#    if not failed:
+#        device_reset(ser)
+#        log('Done.')
 
-        # compute the row checksum
-        checksum = None
 
-        if row_in_range:
-            words = ih.tobinarray(wordaddr, size=FLASH_ROW_LEN)
-            data = reduce(lambda arr,word: arr.extend([low(word), high(word)]) or arr, words, [])
-            #print [hex(x) for x in data]
-            checksum = -sum(data) & 0xff    # two's complement of lower 8 bits of sum of bytes
-
-        # erase the row
-        if not device_set_params(ser, wordaddr, checksum):
-            failed = True
-            break
-
-        # if the row is within the range of the hex file, program the data
-        if row_in_range:
-            if not device_write(ser, data):
-                failed =  True
-                break
-
-    if not failed:
-        device_reset(ser)
-        log('Done.')
+    ser.write(bytearray(1))
+    status = ser.read(1)
+    print ord(status)
+    ser.write(bytearray(4))
+    status = ser.read(1)
+    print ord(status)
+    ser.write(bytearray(9))
+    status = ser.read(1)
+    print ord(status)
+    ser.write(bytearray(64))
+    status = ser.read(1)
+    print ord(status)
 
     log('Closing serial port '+port)
     ser.close()
 
-    if failed:
-        exit_with_error(127, 'Programming failed')
+#    if failed:
+#        exit_with_error(127, 'Programming failed')
 
     return 0
 
