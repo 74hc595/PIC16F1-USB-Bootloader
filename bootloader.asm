@@ -564,20 +564,19 @@ bootloader_exec_cmd
 
 ; Resets the device if the received byte matches the reset character.
 _bootloader_reset
-	retlw	1
-;	movlw	BCMD_RESET_CHAR
-;	subwf	BANKED_EP1OUT_BUF,w	; check received character
-;	skpz
-;	retlw	BSTAT_INVALID_COMMAND
+	movlw	BCMD_RESET_CHAR
+	subwf	BANKED_EP1OUT_BUF,w	; check received character
+	skpz
+	retlw	BSTAT_INVALID_COMMAND
 ; command is valid, reset the device
-;	reset
+	reset
 
 _bootloader_set_params
-	retlw	4
+	retlw	1
 ;	retlw	BSTAT_VERIFY_FAILED
 
 _bootloader_write
-	retlw	64
+	retlw	1
 ;	retlw	BSTAT_INVALID_CHECKSUM
 
 

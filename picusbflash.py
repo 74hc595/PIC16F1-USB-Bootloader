@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import argparse, os, sys
+import argparse, errno, os, sys
 from serial import Serial
 from intelhex import IntelHex16bit, IntelHexError
 
@@ -180,19 +180,7 @@ def main(args):
 #        log('Done.')
 
 
-    ser.write(bytearray(1))
-    status = ser.read(1)
-    print ord(status)
-    ser.write(bytearray(4))
-    status = ser.read(1)
-    print ord(status)
-    ser.write(bytearray(9))
-    status = ser.read(1)
-    print ord(status)
-    ser.write(bytearray(64))
-    status = ser.read(1)
-    print ord(status)
-
+    ser.write('R')
     log('Closing serial port '+port)
     ser.close()
 
