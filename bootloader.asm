@@ -2,9 +2,28 @@
 ;
 ; USB 512-Word CDC Bootloader for PIC16(L)F1454/5/9
 ;
-; Labels that do not begin with an underscore can be called as functions.
-; Labels that begin with an underscore are not safe to call, they should only
-; be reached via goto.
+; Bootloader is entered if the MCLR/RA3 pin is grounded at power-up or reset,
+; or if there is no application programmed. (The internal pull-up is used,
+; no external resistor is necessary.)
+;
+; To be detected as a valid application, the lower 8 bytes of the first
+; instruction word must NOT be 0xFF.
+;
+; At application start, the device is configured with a 48MHz CPU clock,
+; using the internal oscillator and 3x PLL. If a different oscillator
+; configuration is required, it must be set by the application.
+; Also, the bootloader clears the WPUEN flag in OPTION_REG, enabling weak
+; pull-ups on pins RA3, RA4, and RA5. This flag should be cleared by the
+; application if the pull-ups are not desired.
+;
+; Code notes:
+; - Labels that do not begin with an underscore can be called as functions.
+;   Labels that begin with an underscore are not safe to call, they should only
+;   be reached via goto.
+;
+; - FSR0L, FSR0H, FSR1L, and FSR1H are used as temporary registers in several
+;   places, e.g. as loop counters. They're accessible regardless of the current
+;   bank, and automatically saved/restored on interrupt. Neato!
 
 LOGGING_ENABLED		equ	1
 USE_STRING_DESCRIPTORS	equ	0
@@ -24,7 +43,7 @@ VERIFY_WRITES		equ	1
 
 
 ;;; Configuration
-	__config _CONFIG1, _FOSC_INTOSC & _WDTE_OFF & _PWRTE_ON & _MCLRE_ON & _CP_OFF & _BOREN_ON & _IESO_OFF & _FCMEN_OFF
+	__config _CONFIG1, _FOSC_INTOSC & _WDTE_OFF & _PWRTE_ON & _MCLRE_OFF & _CP_OFF & _BOREN_ON & _IESO_OFF & _FCMEN_OFF
 	__config _CONFIG2, _WRT_HALF & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LVP_OFF
 
 
@@ -71,6 +90,9 @@ EPBUF_ADRH		equ	(EP0OUT_BUF>>8)
 
 USED_RAM_LEN		equ	EP1OUT_BUF+EP1_OUT_BUF_SIZE-BDT_START
 
+; Application code locations
+APP_ENTRY_POINT		equ	0x1000
+
 ; USB_STATE bit flags
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
 ADDRESS_PENDING		equ	1	; need to set address in next IN transaction
@@ -81,11 +103,11 @@ DEVICE_CONFIGURED	equ	2	; the device is configured
 ;;; Vectors
 	org	0x0000
 RESET_VECT
-; configure the oscillator (48MHz from INTOSC using 3x PLL)
-	banksel	OSCCON
-	movlw	(1<<SPLLEN)|(1<<SPLLMULT)|(1<<IRCF3)|(1<<IRCF2)|(1<<IRCF1)|(1<<IRCF0)
-	movwf	OSCCON
-	goto	bootloader_start
+; prepare FSR0 to check for application code
+	clrf	FSR0L
+	movlw	(high APP_ENTRY_POINT)|0x80	; need to set high bit to indicate program memory
+	movwf	FSR0H
+	goto	bootloader_start	; to be continued further down in the file
 
 	org	0x0004
 INTERRUPT_VECT
@@ -697,12 +719,37 @@ flash_unlock
 
 ;;; Main function
 bootloader_start
+; Enable weak pull-ups
+	banksel	OPTION_REG
+	bcf	OPTION_REG,NOT_WPUEN
+
+; Configure the oscillator (48MHz from INTOSC using 3x PLL)
+	banksel	OSCCON
+	movlw	(1<<SPLLEN)|(1<<SPLLMULT)|(1<<IRCF3)|(1<<IRCF2)|(1<<IRCF1)|(1<<IRCF0)
+	movwf	OSCCON
+
 ; Wait for the oscillator and PLL to stabilize
 _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	andwf	OSCSTAT,w
 	sublw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	bnz	_wosc
 
+; Check for valid application code: the lower 8 bits of the first word cannot be 0xFF
+	moviw	FSR0
+	incw				; if W was 0xFF, it'll be 0 now
+	bz	_bootloader_main	; if we have no application, enter bootloader mode
+
+; We have a valid application? Check if the entry pin is grounded
+	banksel	PORTA
+	btfss	PORTA,RA3
+	goto	_bootloader_main	; enter bootloader mode if input is low
+
+; We have a valid application and the entry pin is high. Start the application.
+	pagesel	APP_ENTRY_POINT
+	goto	APP_ENTRY_POINT
+
+; Not entering application code: initialize the USB interface and wait for commands.
+_bootloader_main
 ; Enable active clock tuning
 	banksel	ACTCON
 	movlw	(1<<ACTSRC)|(1<<ACTEN)

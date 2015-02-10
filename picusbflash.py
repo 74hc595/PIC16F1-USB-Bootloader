@@ -76,7 +76,7 @@ def device_write(ser, databytes):
         return True
 
 def device_reset(ser):
-    log('! Resetting device')
+    log('= Resetting device')
     ser.write(bytearray([BCMD_RESET]))
     return True
 
