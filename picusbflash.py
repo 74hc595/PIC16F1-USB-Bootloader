@@ -180,7 +180,9 @@ def main(args):
 #        log('Done.')
 
 
-    ser.write('R')
+    ser.write(bytearray([0x00, 0x10, 0x00, 0x45]))
+    print repr(bytearray(ser.read(1)))
+    #ser.write('R')
     log('Closing serial port '+port)
     ser.close()
 

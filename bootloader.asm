@@ -52,8 +52,12 @@ BANKED_EP0OUT_BUF	equ	BANKED_EP3OUT	; buffers go immediately after EP2 IN's buff
 EP0IN_BUF		equ	EP0OUT_BUF+EP0_BUF_SIZE
 BANKED_EP0IN_BUF	equ	BANKED_EP0OUT_BUF+EP0_BUF_SIZE
 
-EP1IN_BUF		equ	EP0IN_BUF+EP0_BUF_SIZE
-BANKED_EP1IN_BUF	equ	BANKED_EP0IN_BUF+EP0_BUF_SIZE
+; Use another byte to store the checksum we use to verify writes
+EXTRA_VARS_LEN		equ	1
+EXPECTED_CHECKSUM	equ	BANKED_EP0IN_BUF+EP0_BUF_SIZE	; for saving expected checksum
+
+EP1IN_BUF		equ	EP0IN_BUF+EP0_BUF_SIZE+EXTRA_VARS_LEN
+BANKED_EP1IN_BUF	equ	BANKED_EP0IN_BUF+EP0_BUF_SIZE+EXTRA_VARS_LEN
 
 EP1OUT_BUF		equ	EP1IN_BUF+EP1_IN_BUF_SIZE	; only use 1 byte for EP1 IN
 BANKED_EP1OUT_BUF	equ	BANKED_EP1IN_BUF+EP1_IN_BUF_SIZE
@@ -572,14 +576,51 @@ _bootloader_reset
 	reset
 
 _bootloader_set_params
-	retlw	1
-;	retlw	BSTAT_VERIFY_FAILED
+	movfw	BANKED_EP1OUT_BUF+BCMD_SET_PARAMS_CKSUM	; expected checksum
+	movwf	EXPECTED_CHECKSUM			; save for verification during write command
+	movfw	BANKED_EP1OUT_BUF+BCMD_SET_PARAMS_ERASE
+	movwf	FSR1L	; temp
+	movfw	BANKED_EP1OUT_BUF+BCMD_SET_PARAMS_ADRL	; address lower bits
+	movwf	FSR1H	; temp
+	movfw	BANKED_EP1OUT_BUF+BCMD_SET_PARAMS_ADRH	; address upper bits 
+	banksel	PMADRH
+	movwf	PMADRH
+	movfw	FSR1H	; bring lower bits out of temp
+	movwf	PMADRL
+; do we need to erase?
+	movlw	BCMD_ERASE_CHAR
+	subwf	FSR1L,w
+	skpz
+	retlw	BSTAT_OK	; if no reset command is given, return OK
+
+; erases the row of flash in PMADRH:PMADRL
+; BSR=3
+_bootloader_erase
+	movlw	(1<<FREE)|(1<<WREN)	; enable write and erase to program memory
+	movwf	PMCON1
+	call	flash_unlock		; stalls until erase finishes
+	bcf	PMCON1,WREN		; clear write enable flag
+	retlw	BSTAT_OK
 
 _bootloader_write
 	retlw	1
-;	retlw	BSTAT_INVALID_CHECKSUM
 
 
+
+;;; Executes the flash unlock sequence, performing an erase or write.
+;;; arguments:	PMCON1 bits CFGS, LWLO, FREE and WREN set appropriately
+;;;		BSR=3
+;;; returns:	none
+;;; clobbers:	W
+flash_unlock
+	movlw	0x55
+	movwf	PMCON2
+	movlw	0xAA
+	movwf	PMCON2
+	bsf	PMCON1,WR
+	nop
+	nop
+	return
 
 
 
