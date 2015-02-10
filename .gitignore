@@ -3,3 +3,4 @@
 *.hex
 *.cod
 MPLABXLog.*
+*.o
