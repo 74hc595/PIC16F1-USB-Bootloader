@@ -5,25 +5,26 @@
  */
 
 #include <pic14regs.h>
-#include <stdint.h>
 
-void delay(uint32_t d)
+void app_interrupt(void)
 {
-  uint32_t i;
-  for (i = 0; i < d; i++) {
-    __asm
-      nop
-    __endasm;
-  }
+  /* Clear interrupt flag and toggle LED state */
+  PIR1bits.TMR1IF = 0;
+  PORTA ^= (1 << 5);
 }
 
 
-int app_main()
+int app_main(void)
 {
+  /* RA5 is an output */
   TRISAbits.TRISA5 = 0;
-  while (1) {
-    PORTA ^= (1 << 5);
-    delay(60000);
-  }
+
+  /* Enable Timer1 with 1:8 prescaler and overflow interrupt */
+  T1CON = _T1CKPS1|_T1CKPS0|_TMR1ON;
+  PIE1bits.TMR1IE = 1;
+  INTCONbits.PEIE = 1;
+  INTCONbits.GIE = 1;
+
+  while (1) {}
 }
 

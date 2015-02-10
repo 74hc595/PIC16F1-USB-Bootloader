@@ -1,5 +1,6 @@
   extern __sdcc_gsinit_startup
   extern _app_main
+  extern _app_interrupt
   global _main
 
   global PSAVE
@@ -24,6 +25,12 @@ STK00 res 1
 APP_STARTUP code 0x200
   pagesel __sdcc_gsinit_startup
   goto    __sdcc_gsinit_startup
+
+APP_INTERRUPT code 0x202
+  pagesel _app_interrupt
+  call    _app_interrupt
+  retfie
+
 _main
   pagesel _app_main
   goto    _app_main

@@ -90,8 +90,15 @@ EPBUF_ADRH		equ	(EP0OUT_BUF>>8)
 
 USED_RAM_LEN		equ	EP1OUT_BUF+EP1_OUT_BUF_SIZE-BDT_START
 
+	if LOGGING_ENABLED
+BOOTLOADER_SIZE		equ	0x1000
+	else
+BOOTLOADER_SIZE		equ	0x200
+	endif
+
 ; Application code locations
-APP_ENTRY_POINT		equ	0x1000
+APP_ENTRY_POINT		equ	BOOTLOADER_SIZE
+APP_INTERRUPT		equ	BOOTLOADER_SIZE+2
 
 ; USB_STATE bit flags
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
@@ -111,32 +118,34 @@ RESET_VECT
 
 	org	0x0004
 INTERRUPT_VECT
+; check the high byte of the return address (at the top of the stack)
+	banksel	TOSH
+	if LOGGING_ENABLED
+; for 4k-word mode: if TOSH < 0x10, we're in the bootloader
+; if TOSH >= 0x10, jump to the application interrupt handler
+	movlw	high BOOTLOADER_SIZE
+	subwf	TOSH,w
+	bnc	_bootloader_interrupt
+	pagesel	APP_INTERRUPT
+	goto	APP_INTERRUPT
+	else
+; for 512-word mode: if TOSH == 0, we're in the bootloader
+; if TOSH != 0, jump to the application interrupt handler
+	tstf	TOSH
+	bnz	APP_INTERRUPT
+	endif
+
+; executing from the bootloader? it's a USB interrupt
+_bootloader_interrupt
 	banksel	UIR
 ; reset?
 	btfss	UIR,URSTIF
-	goto	_uidle
-	call	usb_init
+	goto	_utrans		; not a reset? just start servicing transactions
+	call	usb_init	; if so, reset the USB interface (clears interrupts)
 	banksel	PIE2
 	bsf	PIE2,USBIE	; reenable USB interrupts
 	banksel	UIR
 	bcf	UIR,URSTIF	; clear the flag
-; idle? just clear the flag (TODO)
-_uidle	btfsc	UIR,IDLEIF
-	bcf	UIR,IDLEIF
-; error?
-	if LOGGING_ENABLED
-	btfss	UIR,UERRIF
-	goto	_utrans
-	mlog
-	mlogch	'E',0
-	mloghex	1,LOG_NEWLINE
-	mlogf	UEIR
-	mlogend
-	lbnksel	UEIR
-	else
-	btfsc	UIR,UERRIF
-	endif
-	clrf	UEIR		; clear error flags
 ; service transactions
 _utrans	banksel	UIR
 	btfss	UIR,TRNIF
@@ -572,10 +581,6 @@ usb_service_cdc
 	movwf	BANKED_EP1IN_BUF	; copy status to IN buffer
 	movlw	1
 	movwf	BANKED_EP1IN_CNT	; output byte count is 1
-	mlogch	'&',0
-	mloghex	1,LOG_NEWLINE
-	mlogf	BANKED_EP1IN_BUF
-	lbnksel	BANKED_EP1IN_CNT
 	bsf	BANKED_EP1IN_STAT,UOWN
 	; fall through to arm_ep1_out
 
@@ -762,7 +767,9 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	goto	_bootloader_main	; enter bootloader mode if input is low
 
 ; We have a valid application and the entry pin is high. Start the application.
+	if APP_ENTRY_POINT>=2048
 	pagesel	APP_ENTRY_POINT
+	endif
 	goto	APP_ENTRY_POINT
 
 ; Not entering application code: initialize the USB interface and wait for commands.
@@ -832,12 +839,11 @@ usb_init
 	clrf	UEP6
 	clrf	UEP7
 ; set configuration
+	clrf	UEIE		; don't need any error interrupts
 	movlw	(1<<UPUEN)|(1<<FSEN)
 	movwf	UCFG		; enable pullups, full speed, no ping-pong buffering
-	movlw	(1<<BTSEE)|(1<<BTOEE)|(1<<DFN8EE)|(1<<CRC16EE)|(1<<CRC5EE)|(1<<PIDEE)
-	movwf	UEIE		; enable all error interrupts
-	movlw	(1<<IDLEIE)|(1<<TRNIE)|(1<<UERRIE)|(1<<URSTIE)
-	movwf	UIE		; all interrupts except stall, SOF, and Bus Activity Detect
+	movlw	(1<<TRNIE)|(1<<URSTIE)
+	movwf	UIE		; only need interrupts for transaction complete and reset
 ; clear all BDT entries, variables, and buffers
 	ldfsr0d	BDT_START
 	movlw	USED_RAM_LEN

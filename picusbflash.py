@@ -86,8 +86,14 @@ def main(args):
     global log_enabled
     
     parser = argparse.ArgumentParser(
-            description='Uploads firmware (in Intel HEX format) to a PIC16F1454/5/9 using the 512-word USB bootloader.',
-            epilog='If no port is specified using -p, the '+PORT_ENV_VAR+' environment variable is consulted.')
+            description='Uploads firmware (in Intel HEX format) to a PIC16F1xxx using Matt Sarnoff\'s USB bootloader.',
+            epilog='If no port is specified using -p, the '+PORT_ENV_VAR+' environment variable is consulted. '+
+            """
+            The entire range of application program memory (excluding the bootloader region) is erased
+            during the programming process. To preserve the contents of High-Endurance Flash across reprograms,
+            use the -r option with the appropriate value. (e.g. for the PIC16F1454, which has 8K ROM and 128 bytes
+            of HEF, use '-r 8064'.)
+            """)
     parser.add_argument('-v', '--version',
             action='version',
             version='%(prog)s version '+__version__+' by '+__author__)
