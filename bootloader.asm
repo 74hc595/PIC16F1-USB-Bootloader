@@ -8,6 +8,7 @@
 
 LOGGING_ENABLED		equ	1
 USE_STRING_DESCRIPTORS	equ	0
+VERIFY_WRITES		equ	1
 
 	radix dec
 	list n=0,st=off
@@ -575,6 +576,10 @@ _bootloader_reset
 ; command is valid, reset the device
 	reset
 
+; Sets the write address, expected checksum of the next 32 words,
+; and erases the row at that address if the last byte of the command matches
+; the "erase" character.
+; BSR=0
 _bootloader_set_params
 	movfw	BANKED_EP1OUT_BUF+BCMD_SET_PARAMS_CKSUM	; expected checksum
 	movwf	EXPECTED_CHECKSUM			; save for verification during write command
@@ -593,18 +598,84 @@ _bootloader_set_params
 	skpz
 	retlw	BSTAT_OK	; if no reset command is given, return OK
 
-; erases the row of flash in PMADRH:PMADRL
+; Erases the row of flash in PMADRH:PMADRL.
 ; BSR=3
 _bootloader_erase
 	movlw	(1<<FREE)|(1<<WREN)	; enable write and erase to program memory
 	movwf	PMCON1
 	call	flash_unlock		; stalls until erase finishes
-	bcf	PMCON1,WREN		; clear write enable flag
+_wdone	bcf	PMCON1,WREN		; clear write enable flag
 	retlw	BSTAT_OK
 
+; Verifies that the checksum of the 32 words (64 bytes) in the EP1 OUT buffer
+; matches the previously sent value. If so, the 32 bytes are then written to
+; flash memory at the address in PMADRH:PMADRL. (set by a prior command)
+; BSR=0
 _bootloader_write
-	retlw	1
-
+; The expected checksum is the two's complement of the sum of the bytes.
+; If the data is valid, we can add the checksum to the sum of the bytes and
+; the result will be 0. We initialize a temporary register with the expected
+; checksum, and then add each byte to it as it's processed.
+; If the value in the temp register is 0 after all 64 bytes have been copied
+; to the write latches, proceed with the write.
+	movfw	EXPECTED_CHECKSUM
+	movwf	FSR1L			; use a temp for the running checksum
+	ldfsr0d	EP1OUT_BUF		; set up read pointer
+	movlw	(1<<LWLO)|(1<<WREN)	; write to latches only
+	banksel	PMCON1
+	movwf	PMCON1
+; simultaneously compute the checksum of the 32 words and copy them to the
+; write latches
+	movlw	32			; number of words to write minus 1
+	movwf	FSR1H			; used for loop count
+_wloop	moviw	FSR0++			; load lower byte
+	addwf	FSR1L,f			; add lower byte to checksum
+	movwf	PMDATL			; copy to write latch
+	moviw	FSR0++			; load upper byte
+	addwf	FSR1L,f			; add upper byte to checksum
+	movwf	PMDATH			; copy to write latch
+; after writing the 32nd word to PMDATH:PMDATL, don't execute the unlock sequence
+; or advance the address pointer!
+	decf	FSR1H,f			; decrement loop count
+	bz	_wcksum			; if 0, we're done writing to the latches
+; still have more words to go
+	call	flash_unlock		; execute unlock sequence
+	incf	PMADRL,f		; increment write address
+	goto	_wloop
+; verify the checksum
+_wcksum	clrf	PMCON1
+	tstf	FSR1L
+	skpz
+	retlw	BSTAT_INVALID_CHECKSUM	; if there's a mismatch, abort the write
+; checksum is valid, write the data
+	bsf	PMCON1,WREN
+	call	flash_unlock		; stalls until write finishes
+	if VERIFY_WRITES==0
+	goto	_wdone
+	else
+; verify the write: compare each byte in the buffer to its counterpart that
+; was just written to flash.
+; we do this backwards so we don't waste instructions resetting the pointers.
+; (note: PMADRH:PMADRL is already pointing at the last written word, but FSR0
+; is pointing to one byte past the end of the buffer)
+	clrf	PMCON1			; clear write enable
+	bsf	FSR1H,5			; set loop count to 32 (just need to set one bit because it's already 0)
+_vloop	bsf	PMCON1,RD		; read word from flash
+	nop				; 2 required nops
+	nop
+	moviw	--FSR0			; get high byte of expected word
+	subwf	PMDATH,w		; compare with high byte written to flash
+	skpz
+	retlw	BSTAT_VERIFY_FAILED
+	moviw	--FSR0			; get low byte of expected word
+	subwf	PMDATL,w		; compare with low byte written to flash
+	skpz
+	retlw	BSTAT_VERIFY_FAILED
+	decf	PMADRL,f		; decrement read address
+	decfsz	FSR1H,f			; decrement loop count
+	goto	_vloop
+	retlw	BSTAT_OK
+	endif
 
 
 ;;; Executes the flash unlock sequence, performing an erase or write.
