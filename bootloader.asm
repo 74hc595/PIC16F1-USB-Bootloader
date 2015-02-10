@@ -158,6 +158,23 @@ _ucdc	call	usb_service_cdc	; USTAT value is still in FSR1H
 
 
 
+;;; Idle loop. In bootloader mode, the MCU just spins here, and all USB
+;;; communication is interrupt-driven.
+;;; This snippet is deliberately located within the first 256 words of program
+;;; memory, so we can easily check in the interrupt handler if the interrupt
+;;; occurred while executing application code or bootloader code.
+;;; (TOSH will be 0x00 when executing bootloader code, i.e. this snippet)
+bootloader_main_loop
+	bsf	INTCON,GIE	; enable interrupts
+_loop
+	if LOGGING_ENABLED
+; Print any pending characters in the log
+	call	log_service
+	endif
+	goto	_loop
+
+
+
 ;;; Handles a control transfer on endpoint 0.
 ;;; arguments:	expects USTAT value in FSR1H
 ;;;		BSR=0
@@ -713,7 +730,7 @@ flash_unlock
 	bsf	PMCON1,WR
 	nop
 	nop
-	return
+ret	return
 
 
 
@@ -770,16 +787,25 @@ _bootloader_main
 
 ; Initialize USB
 	call	usb_init
-	call	usb_attach
-	bsf	INTCON,GIE	; enable interrupts
 
-; Main loop
-loop	
-	if LOGGING_ENABLED
-; Print any pending characters in the log
-	call	log_service
-	endif
-	goto	loop
+; Attach to the bus (could be a subroutine, but inlining it saves 2 instructions)
+_usb_attach
+	logch	'A',0
+	banksel	UCON		; reset UCON
+	clrf	UCON
+	banksel	PIE2
+	bsf	PIE2,USBIE	; enable USB interrupts
+	bsf	INTCON,PEIE
+	banksel	UCON
+_usben	bsf	UCON,USBEN	; enable USB module and wait until ready
+	btfss	UCON,USBEN
+	goto	_usben
+	logch	'!',LOG_NEWLINE
+
+; Enable interrupts and enter an idle loop
+; (Loop code is located at the top of the file, in the first 256 words of
+; program memory)
+	goto	bootloader_main_loop
 
 
 
@@ -850,27 +876,6 @@ _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	BANKED_EP1OUT_ADRH
 	movwf	BANKED_EP1IN_ADRH
 	goto	arm_ep0_out
-
-
-
-;;; Enables the USB module.
-;;; Assumes all registers have been properly configured by calling usb_init.
-;;; arguments:	none
-;;; returns:	none
-;;; clobbers:	W, BSR, FSR0
-usb_attach
-	logch	'A',0
-	banksel	UCON		; reset UCON
-	clrf	UCON
-	banksel	PIE2
-	bsf	PIE2,USBIE	; enable USB interrupts
-	bsf	INTCON,PEIE
-	banksel	UCON
-_usben	bsf	UCON,USBEN	; enable USB module and wait until ready
-	btfss	UCON,USBEN
-	goto	_usben
-	logch	'!',LOG_NEWLINE
-ret	return
 
 
 
