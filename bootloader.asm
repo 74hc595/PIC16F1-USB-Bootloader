@@ -565,23 +565,6 @@ usb_service_cdc
 	movlw	(1<<DTS)
 	retbfs	FSR1H,ENDP1		; ignore endpoint 2
 	bbfs	FSR1H,DIR,arm_ep1_in	; if endpoint 1 IN, rearm buffer
-
-	if 0
-	movlw	1			; send a 1 character response
-	movwf	BANKED_EP1IN_CNT
-	movfw	BANKED_EP1OUT_BUF	; copy the first received character to the IN buffer
-	andlw	b'00011111'		; but fix the upper the 3 bits to 010
-	iorlw	b'01000000'
-	movwf	BANKED_EP1IN_BUF	; so it will be echoed back
-	mlogch	'%',0
-	mloghex	2,LOG_SPACE|LOG_NEWLINE
-	mlogf	BANKED_EP1OUT_CNT	; echo the character count
-	mlogf	BANKED_EP1OUT_BUF	; echo the first character
-	mlogend
-	lbnksel	BANKED_EP1OUT_STAT
-	goto	arm_ep1_out
-	endif
-
 	movf	BANKED_EP1OUT_CNT,f	; test for a zero-length packet
 	bz	arm_ep1_out		; (just ignore them and rearm the OUT buffer)
 	bcf	BANKED_EP1IN_STAT,UOWN
