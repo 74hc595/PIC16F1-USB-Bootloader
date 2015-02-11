@@ -15,7 +15,7 @@ OUT = blink
 SRC = blink.c
 
 # Assembly files to assemble
-ASM = crt_bootloader_4k.S
+ASM = crt_bootloader_512.S
 
 # The SDCC-specific (case sensitive) part number of the chip
 # (use `make list-devices` if not known)
@@ -26,7 +26,7 @@ CC_DEVICE = 16f1454
 ########## Build settings ##########
 
 CFLAGS = --use-non-free --stack-size 8 --opt-code-speed --std-sdcc99 -DNO_BIT_DEFINES
-LDFLAGS = -Wl-s16f1xxx_bootloader_4k.lkr
+LDFLAGS = -Wl-s16f1xxx_bootloader_512.lkr
 CC = sdcc
 AS = gpasm
 LD = gplink

@@ -4,9 +4,7 @@
 LIBPATH .
 
 CODEPAGE   NAME=boot       START=0x0               END=0x1FF          PROTECTED
-CODEPAGE   NAME=page0      START=0x200             END=0xFFF
-CODEPAGE   NAME=page1      START=0x1000            END=0x17FF                   
-CODEPAGE   NAME=page2      START=0x1800            END=0x1FFF                   
+CODEPAGE   NAME=page0      START=0x200             END=0x1FFF
 CODEPAGE   NAME=.idlocs    START=0x8000            END=0x8003         PROTECTED 
 CODEPAGE   NAME=.devid     START=0x8006            END=0x8006         PROTECTED 
 CODEPAGE   NAME=.config    START=0x8007            END=0x8008         PROTECTED 
@@ -94,8 +92,6 @@ DATABANK   NAME=gpr11      START=0x5A0             END=0x5EF          SHADOW=lin
 DATABANK   NAME=gpr12      START=0x620             END=0x64F          SHADOW=linear0:0x23C0
 
 SECTION    NAME=PROG0      ROM=page0           // ROM code space - page0
-SECTION    NAME=PROG1      ROM=page1           // ROM code space - page1
-SECTION    NAME=PROG2      ROM=page2           // ROM code space - page2
 SECTION    NAME=IDLOCS     ROM=.idlocs         // ID locations
 SECTION    NAME=LINEAR0    RAM=linear0         // Linear Memory
 

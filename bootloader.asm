@@ -25,7 +25,7 @@
 ;   places, e.g. as loop counters. They're accessible regardless of the current
 ;   bank, and automatically saved/restored on interrupt. Neato!
 
-LOGGING_ENABLED		equ	1
+LOGGING_ENABLED		equ	0
 USE_STRING_DESCRIPTORS	equ	0
 VERIFY_WRITES		equ	1
 
@@ -42,9 +42,16 @@ VERIFY_WRITES		equ	1
 	errorlevel -302
 
 
+
 ;;; Configuration
+	if LOGGING_ENABLED
+WRT_CONFIG		equ	_WRT_HALF
+	else
+WRT_CONFIG		equ	_WRT_BOOT
+	endif
+
 	__config _CONFIG1, _FOSC_INTOSC & _WDTE_OFF & _PWRTE_ON & _MCLRE_OFF & _CP_OFF & _BOREN_ON & _IESO_OFF & _FCMEN_OFF
-	__config _CONFIG2, _WRT_HALF & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LVP_OFF
+	__config _CONFIG2, WRT_CONFIG & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LVP_OFF
 
 
 
@@ -118,22 +125,22 @@ RESET_VECT
 
 	org	0x0004
 INTERRUPT_VECT
-; check the high byte of the return address (at the top of the stack)
-	banksel	TOSH
-	if LOGGING_ENABLED
-; for 4k-word mode: if TOSH < 0x10, we're in the bootloader
-; if TOSH >= 0x10, jump to the application interrupt handler
-	movlw	high BOOTLOADER_SIZE
-	subwf	TOSH,w
-	bnc	_bootloader_interrupt
-	pagesel	APP_INTERRUPT
-	goto	APP_INTERRUPT
-	else
-; for 512-word mode: if TOSH == 0, we're in the bootloader
-; if TOSH != 0, jump to the application interrupt handler
-	tstf	TOSH
-	bnz	APP_INTERRUPT
-	endif
+;; check the high byte of the return address (at the top of the stack)
+;	banksel	TOSH
+;	if LOGGING_ENABLED
+;; for 4k-word mode: if TOSH < 0x10, we're in the bootloader
+;; if TOSH >= 0x10, jump to the application interrupt handler
+;	movlw	high BOOTLOADER_SIZE
+;	subwf	TOSH,w
+;	bnc	_bootloader_interrupt
+;	pagesel	APP_INTERRUPT
+;	goto	APP_INTERRUPT
+;	else
+;; for 512-word mode: if TOSH == 0, we're in the bootloader
+;; if TOSH != 0, jump to the application interrupt handler
+;	tstf	TOSH
+;	bnz	APP_INTERRUPT
+;	endif
 
 ; executing from the bootloader? it's a USB interrupt
 _bootloader_interrupt
