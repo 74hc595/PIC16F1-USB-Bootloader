@@ -105,7 +105,7 @@ def main(args):
             help='the serial port that the PIC is attached to')
     parser.add_argument('-b', '--bootloader-size',
             metavar='SIZE',
-            default=4096,
+            default=512,
             type=int,
             help='size of the bootloader in words, 512 or 4096 (defaults to 512)')
     parser.add_argument('-r', '--rom-size',
@@ -148,12 +148,9 @@ def main(args):
     except IntelHexError, e:
         exit_with_error(5, e)
 
-    # open the serial port
-    log('Opening serial port '+port)
-    try:
-        ser = Serial(port, 38400)    # baud doesn't matter
-    except Exception, e:
-        exit_with_error(6, e)
+    if ih.minaddr() < min_address:
+        exit_with_error(6, 'hex file starts at 0x%04x, but the minimum allowable start address is 0x%04x' % (
+          ih.minaddr(), min_address))
 
     # check for configuration words and warn that they won't be written
     # IntelHex has no "check if address is populated" method, so we have to use
@@ -168,6 +165,13 @@ def main(args):
 
     ih.padding = 0x3fff
     log('Code range: 0x%04x-0x%04x (%d words)' % (ih.minaddr(), ih.maxaddr(), ih.maxaddr()-ih.minaddr()+1))
+    
+    # open the serial port
+    log('Opening serial port '+port)
+    try:
+        ser = Serial(port, 38400)    # baud doesn't matter
+    except Exception, e:
+        exit_with_error(7, e)
 
     failed = False
     for wordaddr in range(min_address, max_address, FLASH_ROW_LEN):
