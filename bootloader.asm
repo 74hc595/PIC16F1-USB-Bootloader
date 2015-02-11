@@ -25,7 +25,7 @@
 ;   places, e.g. as loop counters. They're accessible regardless of the current
 ;   bank, and automatically saved/restored on interrupt. Neato!
 
-LOGGING_ENABLED		equ	0
+LOGGING_ENABLED		equ	1
 USE_STRING_DESCRIPTORS	equ	0
 VERIFY_WRITES		equ	1
 
@@ -203,14 +203,12 @@ usb_service_ep0
 	movfw	BANKED_EP0OUT_STAT
 	andlw	b'00111100'	; isolate PID bits
 	sublw	PID_SETUP	; is it a SETUP packet?
-	if LOGGING_ENABLED
-	bnz	_usb_ctrl_out	; if not, it's a regular OUT
-	else
+	;if LOGGING_ENABLED
+	;bnz	_usb_ctrl_out	; if not, it's a regular OUT
+	;else
 	bnz	arm_ep0_out	; if not, it's a regular OUT, just rearm the buffer
-	endif
+	;endif
 	; it's a SETUP packet--fall through
-
-
 
 ; Handles a SETUP control transfer on endpoint 0.
 ; BSR=0
@@ -221,20 +219,20 @@ _usb_ctrl_setup
 	movfw	BANKED_EP0OUT_BUF+bmRequestType
 	btfss	BANKED_EP0OUT_BUF+bmRequestType,7	; is this host->device?
 	bsf	USB_STATE,IS_CONTROL_WRITE		; if so, this is a control write
-; print packet
-	mlog
-	mlogch	'P',0
-	mloghex	8,LOG_NEWLINE|LOG_SPACE
-	mlogf	BANKED_EP0OUT_BUF+0
-	mlogf	BANKED_EP0OUT_BUF+1
-	mlogf	BANKED_EP0OUT_BUF+2
-	mlogf	BANKED_EP0OUT_BUF+3
-	mlogf	BANKED_EP0OUT_BUF+4
-	mlogf	BANKED_EP0OUT_BUF+5
-	mlogf	BANKED_EP0OUT_BUF+6
-	mlogf	BANKED_EP0OUT_BUF+7
-	mlogend
-	lbnksel	BANKED_EP0OUT_BUF
+;; print packet
+;	mlog
+;	mlogch	'P',0
+;	mloghex	8,LOG_NEWLINE|LOG_SPACE
+;	mlogf	BANKED_EP0OUT_BUF+0
+;	mlogf	BANKED_EP0OUT_BUF+1
+;	mlogf	BANKED_EP0OUT_BUF+2
+;	mlogf	BANKED_EP0OUT_BUF+3
+;	mlogf	BANKED_EP0OUT_BUF+4
+;	mlogf	BANKED_EP0OUT_BUF+5
+;	mlogf	BANKED_EP0OUT_BUF+6
+;	mlogf	BANKED_EP0OUT_BUF+7
+;	mlogend
+;	lbnksel	BANKED_EP0OUT_BUF
 ; check request number: is it Get Descriptor?
 	movlw	GET_DESCRIPTOR
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
@@ -418,23 +416,21 @@ _usb_get_configuration
 	movwf	EP0_DATA_IN_COUNT
 	goto	_usb_ctrl_complete
 
-	if LOGGING_ENABLED
-; Handles an OUT control transfer on endpoint 0.
-; BSR=0
-_usb_ctrl_out
-	logch	'O',LOG_NEWLINE
-	lbnksel	EP0_BUF_SIZE
-; Only time this will get called is in the status stage of a control read,
-; since we don't support any control writes with a data stage.
-; All we have to do is re-arm the OUT endpoint.
-	goto	arm_ep0_out
-	endif
+;	if LOGGING_ENABLED
+;; Handles an OUT control transfer on endpoint 0.
+;; BSR=0
+;_usb_ctrl_out
+;	logch	'O',LOG_NEWLINE
+;	lbnksel	EP0_BUF_SIZE
+;; Only time this will get called is in the status stage of a control read,
+;; since we don't support any control writes with a data stage.
+;; All we have to do is re-arm the OUT endpoint.
+;	goto	arm_ep0_out
+;	endif
 
 ; Handles an IN control transfer on endpoint 0.
 ; BSR=0
 _usb_ctrl_in
-	logch	'I',LOG_NEWLINE
-	lbnksel	USB_STATE
 	btfsc	USB_STATE,IS_CONTROL_WRITE	; is this a control read or write?
 	goto	_check_for_pending_address
 ; fetch more data and re-arm the IN endpoint
@@ -454,11 +450,11 @@ _check_for_pending_address
 	movfw	BANKED_EP0OUT_BUF+wValueL
 	banksel	UADDR
 	movwf	UADDR
-	mlog
-	mlogch	'A',0
-	mloghex	1,LOG_NEWLINE
-	mlogf	UADDR
-	mlogend
+;	mlog
+;	mlogch	'A',0
+;	mloghex	1,LOG_NEWLINE
+;	mlogf	UADDR
+;	mlogend
 	return
 
 
@@ -471,19 +467,19 @@ _check_for_pending_address
 ;;; clobbers:	W, FSR0, FSR1
 ep0_read_in
 	bcf	BANKED_EP0IN_STAT,UOWN	; make sure we have ownership of the buffer
-	mloghex 2,0
-	mlogf	EP0_DATA_IN_PTRH
-	mlogf	EP0_DATA_IN_PTRL
-	mloghex	1,LOG_SPACE
-	mlogf	EP0_DATA_IN_COUNT
-	lbnksel	BANKED_EP0IN_CNT
+	;mloghex 2,0
+	;mlogf	EP0_DATA_IN_PTRH
+	;mlogf	EP0_DATA_IN_PTRL
+	;mloghex	1,LOG_SPACE
+	;mlogf	EP0_DATA_IN_COUNT
+	;lbnksel	BANKED_EP0IN_CNT
 	clrf	BANKED_EP0IN_CNT	; initialize buffer size to 0
 	tstf	EP0_DATA_IN_COUNT	; do nothing if there are 0 bytes to send
-	if LOGGING_ENABLED
-	bz	_nodata
-	else
+	;if LOGGING_ENABLED
+	;bz	_nodata
+	;else
 	retz
-	endif
+	;endif
 	movfw	EP0_DATA_IN_PTRL	; set up source pointer
 	movwf	FSR0L
 	movfw	EP0_DATA_IN_PTRH
@@ -504,27 +500,27 @@ _bcdone	movfw	FSR0L
 	movwf	EP0_DATA_IN_PTRL
 	movfw	FSR0H
 	movwf	EP0_DATA_IN_PTRH
-; print the bytes that were copied
-	mlogch	'[',0
-	mloghex	1,0
-	mlogf	BANKED_EP0IN_CNT
-	mlogch	']',0
-	mloghex	8,LOG_SPACE|LOG_NEWLINE
-	mlogf	BANKED_EP0IN_BUF+0
-	mlogf	BANKED_EP0IN_BUF+1
-	mlogf	BANKED_EP0IN_BUF+2
-	mlogf	BANKED_EP0IN_BUF+3
-	mlogf	BANKED_EP0IN_BUF+4
-	mlogf	BANKED_EP0IN_BUF+5
-	mlogf	BANKED_EP0IN_BUF+6
-	mlogf	BANKED_EP0IN_BUF+7
-	lbnksel	USB_STATE
+;; print the bytes that were copied
+;	mlogch	'[',0
+;	mloghex	1,0
+;	mlogf	BANKED_EP0IN_CNT
+;	mlogch	']',0
+;	mloghex	8,LOG_SPACE|LOG_NEWLINE
+;	mlogf	BANKED_EP0IN_BUF+0
+;	mlogf	BANKED_EP0IN_BUF+1
+;	mlogf	BANKED_EP0IN_BUF+2
+;	mlogf	BANKED_EP0IN_BUF+3
+;	mlogf	BANKED_EP0IN_BUF+4
+;	mlogf	BANKED_EP0IN_BUF+5
+;	mlogf	BANKED_EP0IN_BUF+6
+;	mlogf	BANKED_EP0IN_BUF+7
+;	lbnksel	USB_STATE
 	return
-	if LOGGING_ENABLED
-_nodata	mlogch	' ',LOG_NEWLINE
-	lbnksel	USB_STATE
-	return
-	endif
+;	if LOGGING_ENABLED
+;_nodata	mlogch	' ',LOG_NEWLINE
+;	lbnksel	USB_STATE
+;	return
+;	endif
 
 
 
