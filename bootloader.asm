@@ -529,12 +529,12 @@ _bcdone	movfw	FSR0L
 ;;; returns:	none
 ;;; clobbers:	W, BSR=0
 cdc_init
-	mlogch	'@',LOG_NEWLINE
-	banksel	UEP1
-	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPOUTEN)|(1<<EPINEN)
-	movwf	UEP1
-	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPINEN)
-	movwf	UEP2
+;	banksel	UEP1
+;	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPOUTEN)|(1<<EPINEN)
+;	movwf	UEP1
+;	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPINEN)
+;	movwf	UEP2
+;	mlogch	'C',LOG_NEWLINE
 	banksel	BANKED_EP1OUT_STAT
 	call	arm_ep1_out
 	; arm EP1 IN buffer, clearing data toggle bit
@@ -832,10 +832,7 @@ usb_init
 	banksel	UEIR
 	clrf	UEIR
 	clrf	UIR
-; disable all endpoints
-	clrf	UEP0
-	clrf	UEP1
-	clrf	UEP2
+; disable endpoints we won't use
 	clrf	UEP3
 	clrf	UEP4
 	clrf	UEP5
@@ -866,9 +863,19 @@ _tflush	btfss	UIR,TRNIF
 	bcf	UIR,TRNIF
 	call	ret		; need at least 6 cycles before checking TRNIF again
 	goto	_tflush
-; initialize endpoint 0
+; initialize endpoints:
+; 0 for control
+; 1 for CDC bulk data
+; 2 for CDC notifications (though it's never actually used)
+; my intuition was that I should wait until a SET_CONFIGURATION is received
+; before setting up endpoints 1 and 2... but there seemed to be a timing issue
+; when doing so, so I moved them here
 _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	UEP0
+	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPOUTEN)|(1<<EPINEN)
+	movwf	UEP1
+	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPINEN)
+	movwf	UEP2
 ; initialize endpoint buffers and counts
 	banksel	BANKED_EP0OUT_ADRL
 	movlw	low EP0OUT_BUF	; set endpoint 0 OUT address low
