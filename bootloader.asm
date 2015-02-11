@@ -69,8 +69,9 @@ FOSC			equ	48000000
 BAUD			equ	38400
 BAUDVAL			equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
 
-DEVICE_DESC_LEN		equ	18
-CONFIG_DESC_TOTAL_LEN	equ	67
+DEVICE_DESC_LEN		equ	18	; device descriptor length
+CONFIG_DESC_TOTAL_LEN	equ	67	; total length of configuration descriptor and sub-descriptors
+ALL_DESCS_TOTAL_LEN	equ	DEVICE_DESC_LEN+CONFIG_DESC_TOTAL_LEN	; total length of all descriptors
 
 EP0_BUF_SIZE 		equ	8	; endpoint 0 buffer size
 EP1_OUT_BUF_SIZE	equ	64	; endpoint 1 OUT (CDC data) buffer size
@@ -891,9 +892,15 @@ _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 
 
 
-;;; Descriptors
+;;; Descriptors 
+
+; Place all the descriptors at the end of the bootloader region.
+; This serves 2 purposes: 1) as long as the total length of all descriptors is
+; less than 256, we can address them with an 8-bit pointer,
+; and 2) the assembler will raise an error if space is exhausted.
+	org	BOOTLOADER_SIZE-ALL_DESCS_TOTAL_LEN
 DEVICE_DESCRIPTOR
-	dt	0x12		; bLength
+	dt	DEVICE_DESC_LEN	; bLength
 	dt	0x01		; bDescriptorType
 	dt	0x00, 0x02	; bcdUSB (USB 2.0)
 	dt	0x02		; bDeviceClass (communication device)
@@ -911,7 +918,7 @@ DEVICE_DESCRIPTOR
 CONFIGURATION_DESCRIPTOR
 	dt	0x09		; bLength
 	dt	0x02		; bDescriptorType
-	dt	0x43, 0x00	; wTotalLength
+	dt	CONFIG_DESC_TOTAL_LEN, 0x00	; wTotalLength
 	dt	0x02		; bNumInterfaces
 	dt	0x01		; bConfigurationValue
 	dt	0x00		; iConfiguration
@@ -996,7 +1003,6 @@ ENDPOINT_DESCRIPTOR_1_OUT
 	dt	0x40, 0x00	; wMaxPacketSize (64)
 	dt	0x00		; bInterval
 
-
 	if USE_STRING_DESCRIPTORS
 NUM_STRING_DESCRIPTORS	equ	4
 STRING_DESCRIPTOR_OFFSETS
@@ -1049,4 +1055,10 @@ STRING_DESCRIPTOR_SERIAL_NUMBER
 	dt	'4', 0x00
 	endif
 	
+; Raise an error if the descriptors aren't properly aligned. (This means you
+; changed the descriptors withouth updating the definition of ALL_DESCS_TOTAL_LEN.)
+	if $!=BOOTLOADER_SIZE
+	error "Descriptors must be aligned with the end of the 512-word region"
+	endif
+
 	end	
