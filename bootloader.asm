@@ -80,9 +80,8 @@ EP1_IN_BUF_SIZE		equ	1	; endpoint 1 IN (CDC data) buffer size (only need 1 byte 
 ; Since we're only using 5 endpoints, use the BDT area for buffers,
 ; and use the 4 bytes normally occupied by the EP2 OUT buffer descriptor for variables.
 USB_STATE		equ	BANKED_EP2OUT+0
-EP0_DATA_IN_PTRL	equ	BANKED_EP2OUT+1	; pointer to block of data to be sent
-EP0_DATA_IN_PTRH	equ	BANKED_EP2OUT+2	;   in the current EP0 IN transaction
-EP0_DATA_IN_COUNT	equ	BANKED_EP2OUT+3	; remaining bytes to be sent
+EP0_DATA_IN_PTR		equ	BANKED_EP2OUT+1	; pointer to descriptor to be sent (low byte only)
+EP0_DATA_IN_COUNT	equ	BANKED_EP2OUT+2	; remaining bytes to be sent
 
 EP0OUT_BUF		equ	EP3OUT
 BANKED_EP0OUT_BUF	equ	BANKED_EP3OUT	; buffers go immediately after EP2 IN's buffer descriptor
@@ -338,17 +337,13 @@ _usb_get_descriptor
 	goto	_usb_ctrl_invalid
 _device_descriptor
 	movlw	low DEVICE_DESCRIPTOR
-	movwf	EP0_DATA_IN_PTRL
-	movlw	high DEVICE_DESCRIPTOR
-	movwf	EP0_DATA_IN_PTRH
+	movwf	EP0_DATA_IN_PTR
 	movlw	DEVICE_DESC_LEN
 	movwf	EP0_DATA_IN_COUNT
 	goto	_adjust_data_in_count
 _config_descriptor
 	movlw	low CONFIGURATION_DESCRIPTOR
-	movwf	EP0_DATA_IN_PTRL
-	movlw	high CONFIGURATION_DESCRIPTOR
-	movwf	EP0_DATA_IN_PTRH
+	movwf	EP0_DATA_IN_PTR
 	movlw	CONFIG_DESC_TOTAL_LEN	; length includes all subordinate descriptors
 	movwf	EP0_DATA_IN_COUNT
 
@@ -419,9 +414,7 @@ _usb_get_configuration
 	movlw	low CONFIGURATION_0_CONSTANT
 	btfsc	USB_STATE,DEVICE_CONFIGURED
 	incw
-	movwf	EP0_DATA_IN_PTRL
-	movlw	high CONFIGURATION_0_CONSTANT
-	movwf	EP0_DATA_IN_PTRH
+	movwf	EP0_DATA_IN_PTR
 	movlw	1
 	movwf	EP0_DATA_IN_COUNT
 	goto	_usb_ctrl_complete
@@ -471,17 +464,16 @@ _check_for_pending_address
 
 
 
-;;; Reads data from EP0_DATA_IN_PTRL:EP0_DATA_IN_PTRH, copies it to the EP0 IN buffer,
+;;; Reads descriptor data from EP0_DATA_IN_PTR, copies it to the EP0 IN buffer,
 ;;; and decrements EP0_DATA_IN_COUNT.
 ;;; arguments:	BSR=0
-;;; returns:	EP0_DATA_IN_PTRL:EP0_DATA_IN_PTRH advanced
+;;; returns:	EP0_DATA_IN_PTRL advanced
 ;;;		EP0_DATA_IN_COUNT decremented
 ;;; clobbers:	W, FSR0, FSR1
 ep0_read_in
 	bcf	BANKED_EP0IN_STAT,UOWN	; make sure we have ownership of the buffer
-	mloghex 2,0
-	mlogf	EP0_DATA_IN_PTRH
-	mlogf	EP0_DATA_IN_PTRL
+	mloghex 1,0
+	mlogf	EP0_DATA_IN_PTR
 	mloghex	1,LOG_SPACE
 	mlogf	EP0_DATA_IN_COUNT
 	lbnksel	BANKED_EP0IN_CNT
@@ -492,9 +484,9 @@ ep0_read_in
 	else
 	retz
 	endif
-	movfw	EP0_DATA_IN_PTRL	; set up source pointer
+	movfw	EP0_DATA_IN_PTR		; set up source pointer
 	movwf	FSR0L
-	movfw	EP0_DATA_IN_PTRH
+	movlw	DESCRIPTOR_ADRH|0x80
 	movwf	FSR0H
 	ldfsr1d	EP0IN_BUF		; set up destination pointer
 	clrw
@@ -509,9 +501,7 @@ _bcopy	sublw	EP0_BUF_SIZE		; have we filled the buffer?
 	goto	_bcopy
 ; write back the updated source pointer
 _bcdone	movfw	FSR0L
-	movwf	EP0_DATA_IN_PTRL
-	movfw	FSR0H
-	movwf	EP0_DATA_IN_PTRH
+	movwf	EP0_DATA_IN_PTR
 ; print the bytes that were copied
 	mlogch	'[',0
 	mloghex	1,0
@@ -835,7 +825,9 @@ usb_init
 	movlw	(1<<TRNIE)|(1<<URSTIE)
 	movwf	UIE		; only need interrupts for transaction complete and reset
 ; clear all BDT entries, variables, and buffers
-	ldfsr0d	BDT_START
+	clrf	FSR0L
+	movlw	high BDT_START	; BDT starts at 0x2000
+	movwf	FSR0H
 	movlw	USED_RAM_LEN
 	movwf	FSR1H		; loop count
 	movlw	0
@@ -899,6 +891,7 @@ _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 ; less than 256, we can address them with an 8-bit pointer,
 ; and 2) the assembler will raise an error if space is exhausted.
 	org	BOOTLOADER_SIZE-ALL_DESCS_TOTAL_LEN
+DESCRIPTOR_ADRH	equ	high $
 DEVICE_DESCRIPTOR
 	dt	DEVICE_DESC_LEN	; bLength
 	dt	0x01		; bDescriptorType
