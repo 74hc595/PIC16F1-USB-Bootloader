@@ -1,6 +1,7 @@
   extern __sdcc_gsinit_startup
   extern _app_main
   extern _app_interrupt
+  extern _app_config
   global _main
 
   global PSAVE
@@ -26,7 +27,11 @@ APP_STARTUP code 0x200
   pagesel __sdcc_gsinit_startup
   goto    __sdcc_gsinit_startup
 
-APP_INTERRUPT code 0x202
+APP_CONFIG code 0x202
+  pagesel _app_config
+  goto    _app_config ; must be a 'retlw' instruction, i.e. a constant
+
+APP_INTERRUPT code 0x204
   pagesel _app_interrupt
   call    _app_interrupt
   retfie

@@ -12,9 +12,6 @@
 ; At application start, the device is configured with a 48MHz CPU clock,
 ; using the internal oscillator and 3x PLL. If a different oscillator
 ; configuration is required, it must be set by the application.
-; Also, the bootloader clears the WPUEN flag in OPTION_REG, enabling weak
-; pull-ups on pins RA3, RA4, and RA5. This flag should be cleared by the
-; application if the pull-ups are not desired.
 ;
 ; A serial number between 0 and 65535 should be specified during the build
 ; by using the gpasm -D argument to set the SERIAL_NUMBER symbol, e.g.
@@ -92,7 +89,7 @@ EP1_IN_BUF_SIZE		equ	1	; endpoint 1 IN (CDC data) buffer size (only need 1 byte 
 USB_STATE		equ	BANKED_EP2OUT+0
 EP0_DATA_IN_PTR		equ	BANKED_EP2OUT+1	; pointer to descriptor to be sent (low byte only)
 EP0_DATA_IN_COUNT	equ	BANKED_EP2OUT+2	; remaining bytes to be sent
-
+APP_POWER_CONFIG	equ	BANKED_EP2OUT+3	; application power config byte
 EP0OUT_BUF		equ	EP3OUT
 BANKED_EP0OUT_BUF	equ	BANKED_EP3OUT	; buffers go immediately after EP2 IN's buffer descriptor
 EP0IN_BUF		equ	EP0OUT_BUF+EP0_BUF_SIZE
@@ -124,7 +121,8 @@ BOOTLOADER_SIZE		equ	0x200
 
 ; Application code locations
 APP_ENTRY_POINT		equ	BOOTLOADER_SIZE
-APP_INTERRUPT		equ	BOOTLOADER_SIZE+2
+APP_CONFIG		equ	BOOTLOADER_SIZE+2
+APP_INTERRUPT		equ	BOOTLOADER_SIZE+4
 
 ; USB_STATE bit flags
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
@@ -136,10 +134,10 @@ DEVICE_CONFIGURED	equ	2	; the device is configured
 ;;; Vectors
 	org	0x0000
 RESET_VECT
-; prepare FSR0 to check for application code
-	clrf	FSR0L
-	movlw	(high APP_ENTRY_POINT)|0x80	; need to set high bit to indicate program memory
-	movwf	FSR0H
+; Enable weak pull-ups
+	banksel	OPTION_REG
+	bcf	OPTION_REG,NOT_WPUEN
+	banksel	OSCCON
 	goto	bootloader_start	; to be continued further down in the file
 
 	org	0x0004
@@ -482,7 +480,36 @@ _bcopy	sublw	EP0_BUF_SIZE		; have we filled the buffer?
 ; write back the updated source pointer
 _bcdone	movfw	FSR0L
 	movwf	EP0_DATA_IN_PTR
+; if we're sending the configuration descriptor, we need to inject the app's
+; values for bus power/self power and max current consumption
+_check_for_config_bmattributes
+	movlw	(low CONFIGURATION_DESCRIPTOR)+EP0_BUF_SIZE
+	subwf	FSR0L,w
+	bnz	_check_for_config_bmaxpower
+; if we're sending the first 8 bytes of the configuration descriptor,
+; set bit 6 of bmAttributes if the application is self-powered
+	btfsc	APP_POWER_CONFIG,0
+	bsf	BANKED_EP0IN_BUF+7,6
+	if LOGGING_ENABLED
+	goto	_log_copied_bytes
+	else
+	return
+	endif
+_check_for_config_bmaxpower
+	movlw	(low CONFIGURATION_DESCRIPTOR)+(EP0_BUF_SIZE*2)
+	subwf	FSR0L,w
+	if LOGGING_ENABLED
+	bnz	_log_copied_bytes
+	else
+	retnz
+	endif
+; if we're sending the second 8 bytes of the configuration descriptor,
+; replace bMaxPower with the app's value
+	movfw	APP_POWER_CONFIG
+	bcf	WREG,0			; value is in the upper 7 bits
+	movwf	BANKED_EP0IN_BUF+0
 ; print the bytes that were copied
+_log_copied_bytes
 	mlogch	'[',0
 	mloghex	1,0
 	mlogf	BANKED_EP0IN_CNT
@@ -703,13 +730,9 @@ ret	return
 
 
 ;;; Main function
+;;; BSR=1 (OSCCON bank)
 bootloader_start
-; Enable weak pull-ups
-	banksel	OPTION_REG
-	bcf	OPTION_REG,NOT_WPUEN
-
 ; Configure the oscillator (48MHz from INTOSC using 3x PLL)
-	banksel	OSCCON
 	movlw	(1<<SPLLEN)|(1<<SPLLMULT)|(1<<IRCF3)|(1<<IRCF2)|(1<<IRCF1)|(1<<IRCF0)
 	movwf	OSCCON
 
@@ -720,8 +743,7 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	bnz	_wosc
 
 ; Check for valid application code: the lower 8 bits of the first word cannot be 0xFF
-	moviw	FSR0
-	incw				; if W was 0xFF, it'll be 0 now
+	call	app_is_present
 	bz	_bootloader_main	; if we have no application, enter bootloader mode
 
 ; We have a valid application? Check if the entry pin is grounded
@@ -730,6 +752,8 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	goto	_bootloader_main	; enter bootloader mode if input is low
 
 ; We have a valid application and the entry pin is high. Start the application.
+	banksel	OPTION_REG
+	bsf	OPTION_REG,NOT_WPUEN	; but first, disable weak pullups
 	if APP_ENTRY_POINT>=2048
 	pagesel	APP_ENTRY_POINT
 	endif
@@ -779,6 +803,40 @@ _usben	bsf	UCON,USBEN	; enable USB module and wait until ready
 
 
 
+;;; Determines if application code is present in flash memory.
+;;; arguments:	none
+;;; returns:	Z flag cleared if application code is present
+;;; clobbers:	W, FSR0
+app_is_present
+	clrf	FSR0L
+	movlw	(high APP_ENTRY_POINT)|0x80	; need to set high bit to indicate program memory
+	movwf	FSR0H
+	moviw	FSR0
+	incw				; if W was 0xFF, it'll be 0 now
+	return				; Z flag will be unset if app code is present
+
+
+
+;;; Gets the application's power config byte and stores it in APP_POWER_CONFIG.
+;;; arguments:	none
+;;; returns:	none
+;;; clobbers:	W, BSR, FSR0
+get_app_power_config
+	banksel	APP_POWER_CONFIG
+	movlw	0x33			; default value: bus-powered, max current 100 mA
+	movwf	APP_POWER_CONFIG
+	call	app_is_present
+	retz				; if Z flag is set, we have no application, just return
+	if LOGGING_ENABLED
+	pagesel	APP_CONFIG
+	endif
+	call	APP_CONFIG		; config value returned in W
+	banksel	APP_POWER_CONFIG
+	movwf	APP_POWER_CONFIG
+	return
+
+
+
 ;;; Initializes the USB system and resets all associated registers.
 ;;; arguments:	none
 ;;; returns:	none
@@ -814,7 +872,10 @@ usb_init
 _ramclr	movwi	FSR0++
 	decfsz	FSR1H,f
 	goto	_ramclr
+; get the app's power configuration (if it's present)
+	call	get_app_power_config
 ; reset ping-pong buffers and address
+	banksel	UCON
 	bsf	UCON,PPBRST
 	clrf	UADDR
 	bcf	UCON,PKTDIS	; enable packet processing
@@ -895,8 +956,8 @@ CONFIGURATION_DESCRIPTOR
 	dt	0x02		; bNumInterfaces
 	dt	0x01		; bConfigurationValue
 	dt	0x00		; iConfiguration
-	dt	b'11000000'	; bmAttributes (self-powered)
-	dt	0x19		; bMaxPower (25 -> 50 mA)
+	dt	0x80		; bmAttributes
+	dt	0x11		; bMaxPower
 
 INTERFACE_DESCRIPTOR_0
 	dt	0x09		; bLength
@@ -996,4 +1057,4 @@ SERIAL_NUMBER_STRING_DESCRIPTOR
 	error "Descriptors must be aligned with the end of the 512-word region"
 	endif
 
-	end	
+	end

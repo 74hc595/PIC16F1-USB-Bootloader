@@ -5,6 +5,9 @@
  */
 
 #include <pic14regs.h>
+#include "usb_bootloader_config.h"
+
+APP_CONFIG(USB_BUS_POWERED, 20 MILLIAMPS);
 
 void app_interrupt(void)
 {
