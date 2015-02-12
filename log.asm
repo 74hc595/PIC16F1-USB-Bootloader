@@ -8,6 +8,12 @@
 ; periodically from your main loop.
 ; The write macros are safe to use in an interrupt handler.
 
+; Constants
+FOSC		equ	48000000
+BAUD		equ	38400
+BAUDVAL		equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
+
+
 ; Linear address of the 256-byte buffer.
 ; Must be aligned to a 256-byte boundary.
 LOG_BUFFER	equ	0x2200
@@ -21,6 +27,15 @@ LOG_HEAD	equ	0x4d3
 LOG_TAIL	equ	0x4d4
 LOG_FMT_FLAGS	equ	0x4d5		; hex count/newline/space flags
 LOG_CURR_BYTE	equ	0x4d6
+
+uart_init
+	banksel	SPBRGL
+	movlw	low BAUDVAL	; set baud rate divisor
+	movwf	SPBRGL
+	bsf	TXSTA,BRGH	; high speed
+	bsf	RCSTA,SPEN	; enable serial port
+	bsf	TXSTA,TXEN	; enable transmission
+	return
 
 log_init
 	banksel	LOG_HEAD

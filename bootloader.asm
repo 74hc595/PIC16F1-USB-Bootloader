@@ -28,14 +28,10 @@
 ; - FSR0L, FSR0H, FSR1L, and FSR1H are used as temporary registers in several
 ;   places, e.g. as loop counters. They're accessible regardless of the current
 ;   bank, and automatically saved/restored on interrupt. Neato!
-;
+
 ; With logging enabled, the bootloader will not fit in 512 words.
 ; Use this only for debugging!
 LOGGING_ENABLED		equ	0
-
-; If 1, the bootloader verifies each row of flash after it's written.
-; I put this behind a switch in case I needed to disable it to save space.
-VERIFY_WRITES		equ	1
 
 
 
@@ -65,11 +61,7 @@ WRT_CONFIG		equ	_WRT_BOOT
 
 
 
-;;; Constants
-FOSC			equ	48000000
-BAUD			equ	38400
-BAUDVAL			equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
-
+;;; Constants and varaiable addresses
 SERIAL_NUMBER_DIGIT_CNT	equ	4
 	ifndef SERIAL_NUMBER
 	variable SERIAL_NUMBER=0	; Why doesnt 'equ' work here? Go figure
@@ -111,6 +103,7 @@ EPBUF_ADRH		equ	(EP0OUT_BUF>>8)
 	error "Endpoint buffers must be in the same 256-word region"
 	endif
 
+; Total length of all RAM (variables, buffers, BDT entries) used by the bootloader,
 USED_RAM_LEN		equ	EP1OUT_BUF+EP1_OUT_BUF_SIZE-BDT_START
 
 	if LOGGING_ENABLED
@@ -287,6 +280,7 @@ _usb_ctrl_invalid
 arm_ep0_out
 	movlw	_DAT0|_DTSEN|_BSTALL
 arm_ep0_out_with_flags			; W specifies STAT flags
+	;TODO TODO TODO ensure CPU owns buffer?
 	movwf	BANKED_EP0OUT_STAT
 	movlw	EP0_BUF_SIZE		; reset the buffer count
 	movwf	BANKED_EP0OUT_CNT
@@ -313,7 +307,8 @@ arm_ep0_in_with_flags			; W specifies STAT flags
 	return
 ; this is a control write: prepare the IN endpoint for the status stage
 ; and the OUT endpoint for the next SETUP transaction
-_cwrite	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
+_cwrite	;TODO TODO TODO ensure CPU owns buffer?
+	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
 	movlw	_DAT0|_DTSEN|_BSTALL	; make OUT buffer ready for next SETUP packet
 	goto	_armbfs			; arm OUT and IN buffers
 
@@ -684,9 +679,6 @@ _wcksum	clrf	PMCON1
 ; checksum is valid, write the data
 	bsf	PMCON1,WREN
 	call	flash_unlock		; stalls until write finishes
-	if VERIFY_WRITES==0
-	goto	_wdone
-	else
 ; verify the write: compare each byte in the buffer to its counterpart that
 ; was just written to flash.
 ; we do this backwards so we don't waste instructions resetting the pointers.
@@ -709,7 +701,6 @@ _vloop	bsf	PMCON1,RD		; read word from flash
 	decfsz	FSR1H,f			; decrement loop count
 	goto	_vloop
 	retlw	BSTAT_OK
-	endif
 
 
 ;;; Executes the flash unlock sequence, performing an erase or write.
@@ -767,13 +758,7 @@ _bootloader_main
 	movwf	ACTCON		; source = USB
 
 	if LOGGING_ENABLED
-; Enable the UART
-	banksel	SPBRGL
-	movlw	low BAUDVAL	; set baud rate divisor
-	movwf	SPBRGL
-	bsf	TXSTA,BRGH	; high speed
-	bsf	RCSTA,SPEN	; enable serial port
-	bsf	TXSTA,TXEN	; enable transmission
+	call	uart_init
 ; Print a power-on character
 	call	log_init
 	logch	'^',LOG_NEWLINE
