@@ -16,6 +16,9 @@ OUT = bootloader
 # Source files to assemble
 ASM = bootloader.asm
 
+# USB serial number for the device
+SERIAL_NUMBER=1
+
 # (use `make list-devices` if not known)
 AS_DEVICE = p16f1454
 
@@ -40,7 +43,7 @@ HEX = $(OUT).hex
 
 # Link
 $(HEX): $(ASM)
-	$(AS) -p $(AS_DEVICE) -o $(HEX) $(ASM)
+	$(AS) -p $(AS_DEVICE) -DSERIAL_NUMBER=$(SERIAL_NUMBER) -o $(HEX) $(ASM)
 
 # Disassemble
 dis: $(HEX)

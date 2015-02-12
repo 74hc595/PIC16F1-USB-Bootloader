@@ -16,6 +16,13 @@
 ; pull-ups on pins RA3, RA4, and RA5. This flag should be cleared by the
 ; application if the pull-ups are not desired.
 ;
+; A serial number between 0 and 65535 should be specified during the build
+; by using the gpasm -D argument to set the SERIAL_NUMBER symbol, e.g.
+;   gpasm -D SERIAL_NUMBER=12345
+; If not specified, it will default to zero.
+; A host may not behave correctly if multiple PICs with the same serial number
+; are connected simultaneously.
+;
 ; Code notes:
 ; - Labels that do not begin with an underscore can be called as functions.
 ;   Labels that begin with an underscore are not safe to call, they should only
@@ -24,13 +31,10 @@
 ; - FSR0L, FSR0H, FSR1L, and FSR1H are used as temporary registers in several
 ;   places, e.g. as loop counters. They're accessible regardless of the current
 ;   bank, and automatically saved/restored on interrupt. Neato!
-
+;
 ; With logging enabled, the bootloader will not fit in 512 words.
 ; Use this only for debugging!
 LOGGING_ENABLED		equ	0
-
-; TODO
-USE_STRING_DESCRIPTORS	equ	0
 
 ; If 1, the bootloader verifies each row of flash after it's written.
 ; I put this behind a switch in case I needed to disable it to save space.
@@ -69,9 +73,15 @@ FOSC			equ	48000000
 BAUD			equ	38400
 BAUDVAL			equ	(FOSC/(16*BAUD))-1	; BRG16=0, BRGH=1
 
+SERIAL_NUMBER_DIGIT_CNT	equ	4
+	ifndef SERIAL_NUMBER
+	variable SERIAL_NUMBER=0	; Why doesnt 'equ' work here? Go figure
+	endif
+
 DEVICE_DESC_LEN		equ	18	; device descriptor length
 CONFIG_DESC_TOTAL_LEN	equ	67	; total length of configuration descriptor and sub-descriptors
-ALL_DESCS_TOTAL_LEN	equ	DEVICE_DESC_LEN+CONFIG_DESC_TOTAL_LEN	; total length of all descriptors
+SERIAL_NUM_DESC_LEN	equ	2+(SERIAL_NUMBER_DIGIT_CNT*2)
+ALL_DESCS_TOTAL_LEN	equ	DEVICE_DESC_LEN+CONFIG_DESC_TOTAL_LEN+SERIAL_NUM_DESC_LEN
 
 EP0_BUF_SIZE 		equ	8	; endpoint 0 buffer size
 EP1_OUT_BUF_SIZE	equ	64	; endpoint 1 OUT (CDC data) buffer size
@@ -321,11 +331,9 @@ _usb_get_descriptor
 	movlw	DESC_CONFIG
 	subwf	BANKED_EP0OUT_BUF+wValueH,w
 	bz	_config_descriptor
-	if USE_STRING_DESCRIPTORS
 	movlw	DESC_STRING
 	subwf	BANKED_EP0OUT_BUF+wValueH,w
 	bz	_string_descriptor
-	endif
 ; unsupported descriptor type
 	mlog
 	mlogch	'?',0
@@ -339,50 +347,22 @@ _device_descriptor
 	movlw	low DEVICE_DESCRIPTOR
 	movwf	EP0_DATA_IN_PTR
 	movlw	DEVICE_DESC_LEN
-	movwf	EP0_DATA_IN_COUNT
-	goto	_adjust_data_in_count
+	goto	_set_data_in_count_from_w
 _config_descriptor
 	movlw	low CONFIGURATION_DESCRIPTOR
 	movwf	EP0_DATA_IN_PTR
 	movlw	CONFIG_DESC_TOTAL_LEN	; length includes all subordinate descriptors
-	movwf	EP0_DATA_IN_COUNT
-
-	if USE_STRING_DESCRIPTORS
-	goto	_adjust_data_in_count
+	goto	_set_data_in_count_from_w
 _string_descriptor
-	movlw	NUM_STRING_DESCRIPTORS		; ensure descriptor number is valid
-	subwf	BANKED_EP0OUT_BUF+wValueL,w
-	bc	_invalid_string_descriptor_index
-	ldfsr0	STRING_DESCRIPTOR_OFFSETS	; index into offsets table
-	movfw	BANKED_EP0OUT_BUF+wValueL
-	addwf	FSR0L,f
-	movlw	0
-	addwfc	FSR0H,f
-	moviw	FSR0				; get offset
-	addwf	FSR0L,f				; add offset to current pointer
-	movlw	0
-	addwfc	FSR0H,f
-	moviw	FSR0				; get descriptor length
+; only one string descriptor (serial number) is supported,
+; so don't bother checking wValueL
+	movlw	low SERIAL_NUMBER_STRING_DESCRIPTOR
+	movwf	EP0_DATA_IN_PTR
+	movlw	SERIAL_NUM_DESC_LEN
+_set_data_in_count_from_w
 	movwf	EP0_DATA_IN_COUNT
-	movfw	FSR0L				; save current pointer location 
-	movwf	EP0_DATA_IN_PTRL
-	movfw	FSR0H
-	movwf	EP0_DATA_IN_PTRH
-	goto	_adjust_data_in_count
-_invalid_string_descriptor_index
-	mlog
-	mlogch	'?',0
-	mlogch	'S',0
-	mloghex	1,LOG_NEWLINE
-	mlogf	BANKED_EP0OUT_BUF+wValueH
-	mlogend
-	lbnksel	BANKED_EP0OUT_BUF
-	goto	_usb_ctrl_invalid
-	endif
-
 ; the count needs to be set to the minimum of the descriptor's length (in W)
 ; and the requested length
-_adjust_data_in_count
 	subwf	BANKED_EP0OUT_BUF+wLengthL,w	; just ignore high byte...
 	bc	_usb_ctrl_complete		; if W <= f, no need to adjust
 	movfw	BANKED_EP0OUT_BUF+wLengthL
@@ -905,7 +885,7 @@ DEVICE_DESCRIPTOR
 	dt	0x01, 0x00	; bcdDevice (1)
 	dt	0x00		; iManufacturer
 	dt	0x00		; iProduct
-	dt	0x00		; iSerialNumber	(TODO)
+	dt	0x01		; iSerialNumber
 	dt	0x01		; bNumConfigurations
 
 CONFIGURATION_DESCRIPTOR
@@ -996,57 +976,19 @@ ENDPOINT_DESCRIPTOR_1_OUT
 	dt	0x40, 0x00	; wMaxPacketSize (64)
 	dt	0x00		; bInterval
 
-	if USE_STRING_DESCRIPTORS
-NUM_STRING_DESCRIPTORS	equ	4
-STRING_DESCRIPTOR_OFFSETS
-	dt	STRING_DESCRIPTOR_LANGS-$
-	dt	STRING_DESCRIPTOR_MANUFACTURER-$
-	dt	STRING_DESCRIPTOR_PRODUCT-$
-	dt	STRING_DESCRIPTOR_SERIAL_NUMBER-$
+; extract nibbles from serial number
+SN1	equ	(SERIAL_NUMBER>>12) & 0xF
+SN2	equ	(SERIAL_NUMBER>>8) & 0xF
+SN3	equ	(SERIAL_NUMBER>>4) & 0xF
+SN4	equ	SERIAL_NUMBER & 0xF
 
-STRING_DESCRIPTOR_LANGS
-	dt	0x04		; bLength
-	dt	0x03		; bDescriptorTYpe
-	dt	0x09, 0x04	; wLANGID[0] (American English)
-
-STRING_DESCRIPTOR_MANUFACTURER
-	dt	0x1A		; bLength
-	dt	0x03		; bDescriptorType
-	dt	'M', 0x00
-	dt	'a', 0x00
-	dt	't', 0x00
-	dt	't', 0x00
-	dt	' ', 0x00
-	dt	'S', 0x00
-	dt	'a', 0x00
-	dt	'r', 0x00
-	dt	'n', 0x00
-	dt	'o', 0x00
-	dt	'f', 0x00
-	dt	'f', 0x00
-
-STRING_DESCRIPTOR_PRODUCT
-	dt	0x12		; bLength
-	dt	0x03		; bDescriptorType
-	dt	'U', 0x00
-	dt	'S', 0x00
-	dt	'B', 0x00
-	dt	' ', 0x00
-	dt	'T', 0x00
-	dt	'e', 0x00
-	dt	's', 0x00
-	dt	't', 0x00
-
-STRING_DESCRIPTOR_SERIAL_NUMBER
-	dt	0x0E		; bLength
-	dt	0x03		; bDescriptorType
-	dt	'C', 0x00
-	dt	'R', 0x00
-	dt	'M', 0x00
-	dt	'1', 0x00
-	dt	'1', 0x00
-	dt	'4', 0x00
-	endif
+SERIAL_NUMBER_STRING_DESCRIPTOR
+	dt	SERIAL_NUM_DESC_LEN	; bLength
+	dt	0x03		; bDescriptorType (STRING)
+	dt	'0'+SN1+((SN1>9)*7), 0x00	; convert hex digits to ASCII
+	dt	'0'+SN2+((SN2>9)*7), 0x00
+	dt	'0'+SN3+((SN3>9)*7), 0x00
+	dt	'0'+SN4+((SN4>9)*7), 0x00
 	
 ; Raise an error if the descriptors aren't properly aligned. (This means you
 ; changed the descriptors withouth updating the definition of ALL_DESCS_TOTAL_LEN.)
