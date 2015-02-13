@@ -213,11 +213,7 @@ usb_service_ep0
 	movfw	BANKED_EP0OUT_STAT
 	andlw	b'00111100'	; isolate PID bits
 	sublw	PID_SETUP	; is it a SETUP packet?
-	if LOGGING_ENABLED
-	bnz	_usb_ctrl_out	; if not, it's a regular OUT
-	else
 	bnz	arm_ep0_out	; if not, it's a regular OUT, just rearm the buffer
-	endif
 	; it's a SETUP packet--fall through
 
 ; Handles a SETUP control transfer on endpoint 0.
@@ -229,20 +225,6 @@ _usb_ctrl_setup
 	movfw	BANKED_EP0OUT_BUF+bmRequestType
 	btfss	BANKED_EP0OUT_BUF+bmRequestType,7	; is this host->device?
 	bsf	USB_STATE,IS_CONTROL_WRITE		; if so, this is a control write
-; print packet
-	mlog
-	mlogch	'P',0
-	mloghex	8,LOG_NEWLINE|LOG_SPACE
-	mlogf	BANKED_EP0OUT_BUF+0
-	mlogf	BANKED_EP0OUT_BUF+1
-	mlogf	BANKED_EP0OUT_BUF+2
-	mlogf	BANKED_EP0OUT_BUF+3
-	mlogf	BANKED_EP0OUT_BUF+4
-	mlogf	BANKED_EP0OUT_BUF+5
-	mlogf	BANKED_EP0OUT_BUF+6
-	mlogf	BANKED_EP0OUT_BUF+7
-	mlogend
-	lbnksel	BANKED_EP0OUT_BUF
 ; check request number: is it Get Descriptor?
 	movlw	GET_DESCRIPTOR
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
@@ -259,22 +241,13 @@ _usb_ctrl_setup
 	movlw	GET_CONFIG
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
 	bz	_usb_get_configuration
-; unhandled request
-_unhreq	mlog
-	mlogch	'?',0
-	mlogch	'R',0
-	mloghex	1,LOG_NEWLINE
-	mlogf	BANKED_EP0OUT_BUF+bRequest
-	mlogend
-	; fall through to _usb_ctrl_invalid
+; unhandled request? fall through to _usb_ctrl_invalid
 
 ; Finishes a rejected SETUP transaction: the endpoints are stalled
 _usb_ctrl_invalid
 	banksel	UCON
 	bcf	UCON,PKTDIS	; reenable packet processing
-	banksel	USB_STATE
-	logch	'X',LOG_NEWLINE
-	lbnksel	BANKED_EP0IN
+	banksel	BANKED_EP0IN_STAT
 	movlw	_DAT0|_DTSEN|_BSTALL
 	call	arm_ep0_in_with_flags
 arm_ep0_out
@@ -318,24 +291,15 @@ _cwrite	;TODO TODO TODO ensure CPU owns buffer?
 ; BSR=0
 _usb_get_descriptor
 ; check descriptor type
-	movlw	DESC_DEVICE
-	subwf	BANKED_EP0OUT_BUF+wValueH,w
-	bz	_device_descriptor
 	movlw	DESC_CONFIG
 	subwf	BANKED_EP0OUT_BUF+wValueH,w
 	bz	_config_descriptor
 	movlw	DESC_STRING
 	subwf	BANKED_EP0OUT_BUF+wValueH,w
 	bz	_string_descriptor
-; unsupported descriptor type
-	mlog
-	mlogch	'?',0
-	mlogch	'D',0
-	mloghex	1,LOG_NEWLINE
-	mlogf	BANKED_EP0OUT_BUF+wValueH
-	mlogend
-	lbnksel	BANKED_EP0OUT_BUF
-	goto	_usb_ctrl_invalid
+	movlw	DESC_DEVICE
+	subwf	BANKED_EP0OUT_BUF+wValueH,w
+	bnz	_usb_ctrl_invalid
 _device_descriptor
 	movlw	low DEVICE_DESCRIPTOR
 	movwf	EP0_DATA_IN_PTR
@@ -392,23 +356,9 @@ _usb_get_configuration
 	movwf	EP0_DATA_IN_COUNT
 	goto	_usb_ctrl_complete
 
-	if LOGGING_ENABLED
-; Handles an OUT control transfer on endpoint 0.
-; BSR=0
-_usb_ctrl_out
-	logch	'O',LOG_NEWLINE
-	lbnksel	EP0_BUF_SIZE
-; Only time this will get called is in the status stage of a control read,
-; since we don't support any control writes with a data stage.
-; All we have to do is re-arm the OUT endpoint.
-	goto	arm_ep0_out
-	endif
-
 ; Handles an IN control transfer on endpoint 0.
 ; BSR=0
 _usb_ctrl_in
-	logch	'I',LOG_NEWLINE
-	lbnksel	USB_STATE
 	btfsc	USB_STATE,IS_CONTROL_WRITE	; is this a control read or write?
 	goto	_check_for_pending_address
 ; fetch more data and re-arm the IN endpoint
@@ -428,11 +378,6 @@ _check_for_pending_address
 	movfw	BANKED_EP0OUT_BUF+wValueL
 	banksel	UADDR
 	movwf	UADDR
-	mlog
-	mlogch	'A',0
-	mloghex	1,LOG_NEWLINE
-	mlogf	UADDR
-	mlogend
 	return
 
 
@@ -445,18 +390,9 @@ _check_for_pending_address
 ;;; clobbers:	W, FSR0, FSR1
 ep0_read_in
 	bcf	BANKED_EP0IN_STAT,UOWN	; make sure we have ownership of the buffer
-	mloghex 1,0
-	mlogf	EP0_DATA_IN_PTR
-	mloghex	1,LOG_SPACE
-	mlogf	EP0_DATA_IN_COUNT
-	lbnksel	BANKED_EP0IN_CNT
 	clrf	BANKED_EP0IN_CNT	; initialize buffer size to 0
 	tstf	EP0_DATA_IN_COUNT	; do nothing if there are 0 bytes to send
-	if LOGGING_ENABLED
-	bz	_nodata
-	else
 	retz
-	endif
 	movfw	EP0_DATA_IN_PTR		; set up source pointer
 	movwf	FSR0L
 	movlw	DESCRIPTOR_ADRH|0x80
@@ -485,46 +421,17 @@ _check_for_config_bmattributes
 ; set bit 6 of bmAttributes if the application is self-powered
 	btfsc	APP_POWER_CONFIG,0
 	bsf	BANKED_EP0IN_BUF+7,6
-	if LOGGING_ENABLED
-	goto	_log_copied_bytes
-	else
 	return
-	endif
 _check_for_config_bmaxpower
 	movlw	(low CONFIGURATION_DESCRIPTOR)+(EP0_BUF_SIZE*2)
 	subwf	FSR0L,w
-	if LOGGING_ENABLED
-	bnz	_log_copied_bytes
-	else
 	retnz
-	endif
 ; if we're sending the second 8 bytes of the configuration descriptor,
 ; replace bMaxPower with the app's value
 	movfw	APP_POWER_CONFIG
 	bcf	WREG,0			; value is in the upper 7 bits
 	movwf	BANKED_EP0IN_BUF+0
-; print the bytes that were copied
-_log_copied_bytes
-	mlogch	'[',0
-	mloghex	1,0
-	mlogf	BANKED_EP0IN_CNT
-	mlogch	']',0
-	mloghex	8,LOG_SPACE|LOG_NEWLINE
-	mlogf	BANKED_EP0IN_BUF+0
-	mlogf	BANKED_EP0IN_BUF+1
-	mlogf	BANKED_EP0IN_BUF+2
-	mlogf	BANKED_EP0IN_BUF+3
-	mlogf	BANKED_EP0IN_BUF+4
-	mlogf	BANKED_EP0IN_BUF+5
-	mlogf	BANKED_EP0IN_BUF+6
-	mlogf	BANKED_EP0IN_BUF+7
-	lbnksel	USB_STATE
 	return
-	if LOGGING_ENABLED
-_nodata	mlogch	' ',LOG_NEWLINE
-	lbnksel	USB_STATE
-	return
-	endif
 
 
 
@@ -533,7 +440,6 @@ _nodata	mlogch	' ',LOG_NEWLINE
 ;;; returns:	none
 ;;; clobbers:	W, BSR=0
 cdc_init
-	mlogch	'@',LOG_NEWLINE
 	banksel	BANKED_EP1OUT_STAT
 	call	arm_ep1_out
 	; arm EP1 IN buffer, clearing data toggle bit
