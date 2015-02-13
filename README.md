@@ -11,6 +11,14 @@ The bootloader is written entirely in assembly language and uses no Microchip co
 
 A sample C program and Makefile are included to demonstrate how to write application code that coexists with the bootloader. The code has been tested to work with [SDCC](http://sdcc.sourceforge.net).
 
+## What's a bootloader?
+
+Typically, in order to upload firmware to a microcontroller, you need an "in-system programmer" device, like the [PICkit 3](http://www.microchip.com/PICkit3), [AVRISP mkII](http://www.atmel.com/tools/avrispmkii.aspx), or [USBtinyISP](http://www.ladyada.net/make/usbtinyisp/). Every upload operation completely erases the device's flash memory and uploads the new firmware.
+
+This has some downsides: in-system programmers cost money, sometimes they require non-free software without universal OS support, and they can be slow.
+
+A *bootloader* solves these problems. It's a small piece of code that lives in a (typically write-protected) region of the microcontroller's flash memory, and allows firmware to be uploaded via a standardized connection--like USB or [RS-232](http://en.wikipedia.org/wiki/RS-232)--without a special programming device. The popular [Arduino](http://arduino.cc) platform uses a [bootloader](http://arduino.cc/en/Hacking/Bootloader?from=Tutorial.Bootloader) to simplify programming, among other things.
+
 ## Read this first!
 
 - This is **experimental** and has barely been tested. A PIC programmed with this bootloader has been confirmed to enumerate and behave correctly under Mac OS X 10.9.5 on a MacBook Pro.
