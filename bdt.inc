@@ -1,5 +1,10 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
-
+;
+; USB 512-Word CDC Bootloader for PIC16(L)F1454/5/9
+; Copyright (c) 2015, Matt Sarnoff (msarnoff.org)
+; v1.0, February 12, 2015
+; Released under a 3-clause BSD license: see the accompanying LICENSE file.
+;
 ; Buffer descriptor table addresses (linear and banked)
 ; Valid only in ping-pong mode 0 (disabled).
 

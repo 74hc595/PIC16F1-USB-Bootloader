@@ -1,6 +1,7 @@
 # Mac OS X Makefile for PIC programming using GPASM
-# Matt Sarnoff (msarnoff.org)
-# November 7, 2014
+# Copyright (c) 2015, Matt Sarnoff (msarnoff.org)
+# v1.0, February 12, 2015
+# Released under a 3-clause BSD license: see the accompanying LICENSE file.
 #
 # Run `make` to build the project as a .hex file.
 # Run `make flash` to program the device.

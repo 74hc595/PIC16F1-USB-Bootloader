@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 #
 # usb16f1prog
+# Copyright (c) 2015, Matt Sarnoff (msarnoff.org)
+# v1.0, February 12, 2015
+# Released under a 3-clause BSD license: see the accompanying LICENSE file.
 #
 # Uploads firmware to a PIC16F1xxx microcontroller programmed with
 # Matt Sarnoff's USB bootloader.
-#
-# Matt Sarnoff (msarnoff.org)
-# February 12, 2015
 #
 # Accepts 16-bit Intel HEX files as input.
 # Can only be used to write to program memory; the bootloader does not support
@@ -57,7 +57,7 @@ from intelhex import IntelHex16bit, IntelHexError
 __version__ = '1.0'
 __author__ = 'Matt Sarnoff (msarnoff.org)'
 
-PORT_ENV_VAR = 'PICUSBFLASH_PORT'
+PORT_ENV_VAR = 'USB16F1PROG_PORT'
 CONFIGURATION_WORD_RANGE = range(0x8000*2, 0x8009*2, 2)
 FLASH_ROW_LEN = 32
 

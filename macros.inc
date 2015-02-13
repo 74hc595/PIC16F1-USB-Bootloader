@@ -1,6 +1,11 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
-; PIC assembly language macros
+; USB 512-Word CDC Bootloader for PIC16(L)F1454/5/9
+; Copyright (c) 2015, Matt Sarnoff (msarnoff.org)
+; v1.0, February 12, 2015
+; Released under a 3-clause BSD license: see the accompanying LICENSE file.
+;
+; PIC assembly language macros.
 
 ;;; Loads the address of the given symbol into FSR0.
 ldfsr0	macro 	x

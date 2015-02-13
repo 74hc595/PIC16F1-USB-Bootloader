@@ -1,8 +1,9 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
 ; USB 512-Word CDC Bootloader for PIC16(L)F1454/5/9
-; Matt Sarnoff (msarnoff.org)
-; February 12, 2015
+; Copyright (c) 2015, Matt Sarnoff (msarnoff.org)
+; v1.0, February 12, 2015
+; Released under a 3-clause BSD license: see the accompanying LICENSE file.
 ;
 ; Bootloader is entered if the MCLR/RA3 pin is grounded at power-up or reset,
 ; or if there is no application programmed. (The internal pull-up is used,

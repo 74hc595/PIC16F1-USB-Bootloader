@@ -1,3 +1,10 @@
+; USB 512-Word CDC Bootloader Application Code
+; Copyright (c) 2015, Matt Sarnoff (msarnoff.org)
+; v1.0, February 12, 2015
+; Released under a 3-clause BSD license: see the accompanying LICENSE file.
+;
+; Startup code for C programs.
+
   extern __sdcc_gsinit_startup
   extern _app_main
   extern _app_interrupt

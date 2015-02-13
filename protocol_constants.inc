@@ -1,6 +1,11 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
-; Constants used by the bootloader communications protocol
+; USB 512-Word CDC Bootloader for PIC16(L)F1454/5/9
+; Copyright (c) 2015, Matt Sarnoff (msarnoff.org)
+; v1.0, February 12, 2015
+; Released under a 3-clause BSD license: see the accompanying LICENSE file.
+;
+; Constants used by the bootloader communications protocol.
 
 ;;; Command is determined by the length of the data packet received.
 ; Set Address/Checksum/Erase Flag

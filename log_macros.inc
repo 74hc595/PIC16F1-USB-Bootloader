@@ -1,6 +1,11 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
-; Macros for log.asm
+; USB 512-Word CDC Bootloader for PIC16(L)F1454/5/9
+; Copyright (c) 2015, Matt Sarnoff (msarnoff.org)
+; v1.0, February 12, 2015
+; Released under a 3-clause BSD license: see the accompanying LICENSE file.
+;
+; Macros for log.asm.
 
 ; Begins a hex byte sequence; the lower 5 bits specify how many of the
 ; following bytes should be printed in hexadecimal.

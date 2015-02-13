@@ -1,5 +1,7 @@
-// File: 16f1xxx_4k_bootloader.lkr
-// Linker script for the PIC16F1455 processor with a 512-word bootloader.
+// USB 512-Word CDC Bootloader Application Code
+// Copyright (c) 2015, Matt Sarnoff (msarnoff.org)
+// v1.0, February 12, 2015
+// Released under a 3-clause BSD license: see the accompanying LICENSE file.
 
 LIBPATH .
 
