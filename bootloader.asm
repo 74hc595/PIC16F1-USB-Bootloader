@@ -1,6 +1,8 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
 ; USB 512-Word CDC Bootloader for PIC16(L)F1454/5/9
+; Matt Sarnoff (msarnoff.org)
+; February 12, 2015
 ;
 ; Bootloader is entered if the MCLR/RA3 pin is grounded at power-up or reset,
 ; or if there is no application programmed. (The internal pull-up is used,
@@ -28,9 +30,24 @@
 ; - FSR0L, FSR0H, FSR1L, and FSR1H are used as temporary registers in several
 ;   places, e.g. as loop counters. They're accessible regardless of the current
 ;   bank, and automatically saved/restored on interrupt. Neato!
+;
+; - As much stuff as possible is packed into bank 0 of RAM. This includes the
+;   buffer descriptors, bootloader state, endpoint 0 OUT and IN buffers,
+;   the endpoint 1 IN buffer (only a single byte is used), and the beginning of
+;   the 64-byte endpoint 1 OUT buffer.
+;
+; - Notification endpoint 2 is enabled, but never used. The endpoint 2 IN
+;   buffer descriptor is left uninitialized. The endpoint 2 OUT buffer
+;   descriptor is used as 4 bytes of RAM.
+;
+; - The programming protocol is described in the 'usb16f1prog' script. It is
+;   very minimal, but does provide checksum verification. Writing the ID words
+;   (0x8000-8003) is not supported at this time, and writing the configuration
+;   words is not possible via self-programming.
 
 ; With logging enabled, the bootloader will not fit in 512 words.
 ; Use this only for debugging!
+; For more info, see log_macros.inc and log.asm.
 LOGGING_ENABLED		equ	0
 
 
@@ -66,6 +83,13 @@ SERIAL_NUMBER_DIGIT_CNT	equ	4
 	ifndef SERIAL_NUMBER
 	variable SERIAL_NUMBER=0	; Why doesnt 'equ' work here? Go figure
 	endif
+
+; I plan to apply for an Openmoko Product ID: the current product ID is temporary.
+; If your organization has its own vendor ID/product ID, substitute it here.
+; The Openmoko vendor/product ID cannot be used in closed-source/non-open-hardware
+; projects: see http://wiki.openmoko.org/wiki/USB_Product_IDs
+USB_VENDOR_ID		equ	0x1D50
+USB_PRODUCT_ID		equ	0xEEEE	; to be filled in once I obtain a product ID
 
 DEVICE_DESC_LEN		equ	18	; device descriptor length
 CONFIG_DESC_TOTAL_LEN	equ	67	; total length of configuration descriptor and sub-descriptors
@@ -831,8 +855,8 @@ DEVICE_DESCRIPTOR
 	dt	0x00		; bDeviceSubclass
 	dt	0x00		; bDeviceProtocol
 	dt	0x08		; bMaxPacketSize0 (8 bytes)
-	dt	0xd8, 0x04	; idVendor (Microchip)
-	dt	0xdd, 0xdd	; idProduct (fake value)
+	dt	low USB_VENDOR_ID, high USB_VENDOR_ID	; idVendor
+	dt	low USB_PRODUCT_ID, high USB_PRODUCT_ID	; idProduct
 	dt	0x01, 0x00	; bcdDevice (1)
 	dt	0x00		; iManufacturer
 	dt	0x00		; iProduct
@@ -944,7 +968,7 @@ SERIAL_NUMBER_STRING_DESCRIPTOR
 ; Raise an error if the descriptors aren't properly aligned. (This means you
 ; changed the descriptors withouth updating the definition of ALL_DESCS_TOTAL_LEN.)
 	if $!=BOOTLOADER_SIZE
-	error "Descriptors must be aligned with the end of the 512-word region"
+	error "Descriptors must be aligned with the end of the bootloader region"
 	endif
 
 	end
