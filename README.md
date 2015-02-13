@@ -19,6 +19,8 @@ This has some downsides: in-system programmers cost money, sometimes they requir
 
 A *bootloader* solves these problems. It's a small piece of code that lives in a (typically write-protected) region of the microcontroller's flash memory, and allows firmware to be uploaded via a standardized connection--like USB or [RS-232](http://en.wikipedia.org/wiki/RS-232)--without a special programming device. The popular [Arduino](http://arduino.cc) platform uses a [bootloader](http://arduino.cc/en/Hacking/Bootloader?from=Tutorial.Bootloader) to simplify programming, among other things.
 
+Once an in-system programmer has been used to program the bootloader onto a microcontroller, new application firmware can be uploaded without it. (Almost every modern microcontroller architecture, including the PIC, allows its flash memory to be "self-programmed" by code running on the device itself.) The area of flash memory containing the bootloader is typically marked as protected so that it's not overwritten when uploading new application firmware.
+
 ## Read this first!
 
 - This is **experimental** and has barely been tested. A PIC programmed with this bootloader has been confirmed to enumerate and behave correctly under Mac OS X 10.9.5 on a MacBook Pro.
