@@ -253,7 +253,6 @@ _usb_ctrl_invalid
 arm_ep0_out
 	movlw	_DAT0|_DTSEN|_BSTALL
 arm_ep0_out_with_flags			; W specifies STAT flags
-	;TODO TODO TODO ensure CPU owns buffer?
 	movwf	BANKED_EP0OUT_STAT
 	movlw	EP0_BUF_SIZE		; reset the buffer count
 	movwf	BANKED_EP0OUT_CNT
@@ -280,7 +279,7 @@ arm_ep0_in_with_flags			; W specifies STAT flags
 	return
 ; this is a control write: prepare the IN endpoint for the status stage
 ; and the OUT endpoint for the next SETUP transaction
-_cwrite	;TODO TODO TODO ensure CPU owns buffer?
+_cwrite	bcf	BANKED_EP0IN_STAT,UOWN	; ensure we have ownership of the buffer
 	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
 	movlw	_DAT0|_DTSEN|_BSTALL	; make OUT buffer ready for next SETUP packet
 	goto	_armbfs			; arm OUT and IN buffers
