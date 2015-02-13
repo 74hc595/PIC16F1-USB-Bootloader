@@ -27,6 +27,7 @@ CC_DEVICE = 16f1454
 
 CFLAGS = --use-non-free --stack-size 8 --opt-code-speed --std-sdcc99 -DNO_BIT_DEFINES
 LDFLAGS = -Wl-s16f1xxx_bootloader_512.lkr
+PROG = ../usb16f1prog	# change this once you've installed the script
 CC = sdcc
 AS = gpasm
 LD = gplink
@@ -56,7 +57,7 @@ dis: $(HEX)
 
 # Flash
 flash: $(HEX)
-	../picusbflash.py $(HEX)
+	$(PROG) $(HEX)
 
 # Clean
 clean:
