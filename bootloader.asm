@@ -1,13 +1,21 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
+; this code is in development and not yet functional
+; at the moment, the code only READS, not WRITES, program memory
+;
+; USB 512-Word DFU Bootloader for PIC16(L)F1454/5/9
+; Copyright (c) 2015, Peter Lawrence
+; derived from
 ; USB 512-Word CDC Bootloader for PIC16(L)F1454/5/9
 ; Copyright (c) 2015, Matt Sarnoff (msarnoff.org)
-; v1.0, February 12, 2015
+
 ; Released under a 3-clause BSD license: see the accompanying LICENSE file.
 ;
-; Bootloader is entered if the MCLR/RA3 pin is grounded at power-up or reset,
-; or if there is no application programmed. (The internal pull-up is used,
-; no external resistor is necessary.)
+; Bootloader is entered if:
+; - the MCLR/RA3 pin is grounded at power-up or reset,
+; (The internal pull-up is used; no external resistor is necessary.)
+; - there is no application programmed,
+; - the watchdog timed out
 ;
 ; To be detected as a valid application, the lower 8 bytes of the first
 ; instruction word must NOT be 0xFF.
@@ -32,26 +40,12 @@
 ;   places, e.g. as loop counters. They're accessible regardless of the current
 ;   bank, and automatically saved/restored on interrupt. Neato!
 ;
-; - As much stuff as possible is packed into bank 0 of RAM. This includes the
-;   buffer descriptors, bootloader state, endpoint 0 OUT and IN buffers,
-;   the endpoint 1 IN buffer (only a single byte is used), and the beginning of
-;   the 64-byte endpoint 1 OUT buffer.
+; - As much stuff as possible is packed into bank 0 of USB RAM. This includes the
+;   buffer descriptors, bootloader state, and endpoint 0 OUT and IN buffers
 ;
-; - Notification endpoint 2 is enabled, but never used. The endpoint 2 IN
-;   buffer descriptor is left uninitialized. The endpoint 2 OUT buffer
-;   descriptor is used as 4 bytes of RAM.
-;
-; - The programming protocol is described in the 'usb16f1prog' script. It is
-;   very minimal, but does provide checksum verification. Writing the ID words
-;   (0x8000-8003) is not supported at this time, and writing the configuration
-;   words is not possible via self-programming.
-
-; With logging enabled, the bootloader will not fit in 512 words.
-; Use this only for debugging!
-; For more info, see log_macros.inc and log.asm.
-LOGGING_ENABLED		equ	0
-
-
+; - Using DFU has the substantive advantage of needing only EP0.  A backwards-
+;   compatible extension to the protocol is to use wBlockNum in DFU_DNLOAD and 
+;   DFU_UPLOAD as the PIC flash row index (and optional PMCON1 CFGS select)
 
 	radix dec
 	list n=0,st=off
@@ -61,20 +55,13 @@ LOGGING_ENABLED		equ	0
 	include "bdt.inc"
 	include "usb.inc"
 	include "protocol_constants.inc"
-	include "log_macros.inc"
 	list
 	errorlevel -302
 
-
-
 ;;; Configuration
-	if LOGGING_ENABLED
-WRT_CONFIG		equ	_WRT_HALF
-	else
 WRT_CONFIG		equ	_WRT_BOOT
-	endif
 
-	__config _CONFIG1, _FOSC_INTOSC & _WDTE_OFF & _PWRTE_ON & _MCLRE_OFF & _CP_OFF & _BOREN_ON & _IESO_OFF & _FCMEN_OFF
+	__config _CONFIG1, _FOSC_INTOSC & _WDTE_SWDTEN & _PWRTE_ON & _MCLRE_OFF & _CP_ON & _BOREN_ON & _IESO_OFF & _FCMEN_OFF
 	__config _CONFIG2, WRT_CONFIG & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LVP_OFF
 
 
@@ -85,69 +72,55 @@ SERIAL_NUMBER_DIGIT_CNT	equ	4
 	variable SERIAL_NUMBER=0	; Why doesnt 'equ' work here? Go figure
 	endif
 
-; I plan to apply for an Openmoko Product ID: the current product ID is temporary.
+; these values are temporary and for development testing only
 ; If your organization has its own vendor ID/product ID, substitute it here.
-; The Openmoko vendor/product ID cannot be used in closed-source/non-open-hardware
-; projects: see http://wiki.openmoko.org/wiki/USB_Product_IDs
-USB_VENDOR_ID		equ	0x1D50
-USB_PRODUCT_ID		equ	0xEEEE	; to be filled in once I obtain a product ID
+; the VID:PID for the DFU bootloader must be distinct from the product itself, as Windows insists on it
+USB_VENDOR_ID		equ	0x1234
+USB_PRODUCT_ID		equ	0x0001
 
 DEVICE_DESC_LEN		equ	18	; device descriptor length
-CONFIG_DESC_TOTAL_LEN	equ	67	; total length of configuration descriptor and sub-descriptors
+CONFIG_DESC_TOTAL_LEN	equ	18	; total length of configuration descriptor and sub-descriptors
+EXTRAS_LEN		equ	6	; total length of extras
 SERIAL_NUM_DESC_LEN	equ	2+(SERIAL_NUMBER_DIGIT_CNT*2)
-ALL_DESCS_TOTAL_LEN	equ	DEVICE_DESC_LEN+CONFIG_DESC_TOTAL_LEN+SERIAL_NUM_DESC_LEN
+ALL_DESCS_TOTAL_LEN	equ	DEVICE_DESC_LEN+CONFIG_DESC_TOTAL_LEN+EXTRAS_LEN+SERIAL_NUM_DESC_LEN
 
-EP0_BUF_SIZE 		equ	8	; endpoint 0 buffer size
-EP1_OUT_BUF_SIZE	equ	64	; endpoint 1 OUT (CDC data) buffer size
-EP1_IN_BUF_SIZE		equ	1	; endpoint 1 IN (CDC data) buffer size (only need 1 byte to return status codes)
+EP0_BUF_SIZE 		equ	64	; endpoint 0 buffer size
 
-; Since we're only using 5 endpoints, use the BDT area for buffers,
-; and use the 4 bytes normally occupied by the EP2 OUT buffer descriptor for variables.
-USB_STATE		equ	BANKED_EP2OUT+0
-EP0_DATA_IN_PTR		equ	BANKED_EP2OUT+1	; pointer to descriptor to be sent (low byte only)
-EP0_DATA_IN_COUNT	equ	BANKED_EP2OUT+2	; remaining bytes to be sent
-APP_POWER_CONFIG	equ	BANKED_EP2OUT+3	; application power config byte
-EP0OUT_BUF		equ	EP3OUT
-BANKED_EP0OUT_BUF	equ	BANKED_EP3OUT	; buffers go immediately after EP2 IN's buffer descriptor
+; We're only using the USB minimum of 2 endpoints (EP0OUT and EP0IN); use the remaining BDT area for buffers.
+
+; Use the 4 bytes normally occupied by the EP1 OUT (immediately after EP0IN) buffer descriptor for variables.
+USB_STATE		equ	BANKED_EP1OUT+0
+EP0_DATA_IN_PTR		equ	BANKED_EP1OUT+1	; pointer to descriptor to be sent (low byte only)
+EP0_DATA_IN_COUNT	equ	BANKED_EP1OUT+2	; remaining bytes to be sent
+;			equ	BANKED_EP1OUT+3	; spare
+
+; USB data buffers go immediately after memory re-purposed for variables
+EP0OUT_BUF		equ	EP1IN
+BANKED_EP0OUT_BUF	equ	BANKED_EP1IN
 EP0IN_BUF		equ	EP0OUT_BUF+EP0_BUF_SIZE
 BANKED_EP0IN_BUF	equ	BANKED_EP0OUT_BUF+EP0_BUF_SIZE
-
-; Use another byte to store the checksum we use to verify writes
-EXTRA_VARS_LEN		equ	1
-EXPECTED_CHECKSUM	equ	BANKED_EP0IN_BUF+EP0_BUF_SIZE	; for saving expected checksum
-
-EP1IN_BUF		equ	EP0IN_BUF+EP0_BUF_SIZE+EXTRA_VARS_LEN
-BANKED_EP1IN_BUF	equ	BANKED_EP0IN_BUF+EP0_BUF_SIZE+EXTRA_VARS_LEN
-
-EP1OUT_BUF		equ	EP1IN_BUF+EP1_IN_BUF_SIZE	; only use 1 byte for EP1 IN
-BANKED_EP1OUT_BUF	equ	BANKED_EP1IN_BUF+EP1_IN_BUF_SIZE
+EP_DATA_BUF_END		equ	EP0IN_BUF+EP0_BUF_SIZE
 
 ; High byte of all endpoint buffers.
 EPBUF_ADRH		equ	(EP0OUT_BUF>>8)
-	if ((EP0IN_BUF>>8) != (EP0OUT_BUF>>8)) || ((EP1OUT_BUF>>8) != (EP0OUT_BUF>>8)) || ((EP1IN_BUF>>8) != (EP0OUT_BUF>>8))
+	if ((EP0IN_BUF>>8) != (EP0OUT_BUF>>8))
 	error "Endpoint buffers must be in the same 256-word region"
 	endif
 
 ; Total length of all RAM (variables, buffers, BDT entries) used by the bootloader,
-USED_RAM_LEN		equ	EP1OUT_BUF+EP1_OUT_BUF_SIZE-BDT_START
+USED_RAM_LEN		equ	EP_DATA_BUF_END-BDT_START
 
-	if LOGGING_ENABLED
-BOOTLOADER_SIZE		equ	0x1000
-	else
 BOOTLOADER_SIZE		equ	0x200
-	endif
 
 ; Application code locations
 APP_ENTRY_POINT		equ	BOOTLOADER_SIZE
-APP_CONFIG		equ	BOOTLOADER_SIZE+2
 APP_INTERRUPT		equ	BOOTLOADER_SIZE+4
 
 ; USB_STATE bit flags
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
 ADDRESS_PENDING		equ	1	; need to set address in next IN transaction
 DEVICE_CONFIGURED	equ	2	; the device is configured
-
-
+IS_DFU_TRANSFER		equ	3	; when active, ep0_read_in diverts to an alternate routine
 
 ;;; Vectors
 	org	0x0000
@@ -162,20 +135,10 @@ RESET_VECT
 INTERRUPT_VECT
 ; check the high byte of the return address (at the top of the stack)
 	banksel	TOSH
-	if LOGGING_ENABLED
-; for 4k-word mode: if TOSH < 0x10, we're in the bootloader
-; if TOSH >= 0x10, jump to the application interrupt handler
-	movlw	high BOOTLOADER_SIZE
-	subwf	TOSH,w
-	bnc	_bootloader_interrupt
-	pagesel	APP_INTERRUPT
-	goto	APP_INTERRUPT
-	else
 ; for 512-word mode: if TOSH == 0, we're in the bootloader
 ; if TOSH != 0, jump to the application interrupt handler
 	tstf	TOSH
 	bnz	APP_INTERRUPT
-	endif
 
 ; executing from the bootloader? it's a USB interrupt
 _bootloader_interrupt
@@ -197,15 +160,13 @@ _utrans	banksel	UIR
 	bcf	UIR,TRNIF	; clear flag and advance USTAT fifo
 	banksel	BANKED_EP0OUT_STAT
 	andlw	b'01111000'	; check endpoint number
-	bnz	_ucdc		; if not endpoint 0, it's a CDC message
+	bnz	_usdone		; bail if not endpoint 0
 	call	usb_service_ep0	; handle the control message
 	goto	_utrans
 ; clear USB interrupt
 _usdone	banksel	PIR2
 	bcf	PIR2,USBIF
 	retfie
-_ucdc	call	usb_service_cdc	; USTAT value is still in FSR1H
-	goto	_utrans
 
 
 
@@ -218,10 +179,6 @@ _ucdc	call	usb_service_cdc	; USTAT value is still in FSR1H
 bootloader_main_loop
 	bsf	INTCON,GIE	; enable interrupts
 _loop
-	if LOGGING_ENABLED
-; Print any pending characters in the log
-	call	log_service
-	endif
 	goto	_loop
 
 
@@ -245,11 +202,15 @@ usb_service_ep0
 ; BSR=0
 _usb_ctrl_setup
 	bcf	USB_STATE,IS_CONTROL_WRITE
-; get bmRequestType, but don't bother checking whether it's standard/class/vendor...
-; the CDC and standard requests we'll receive have distinct bRequest numbers
-	movfw	BANKED_EP0OUT_BUF+bmRequestType
+	bcf	USB_STATE,IS_DFU_TRANSFER
+; set IS_CONTROL_WRITE bit in USB_STATE according to MSB in bmRequestType
 	btfss	BANKED_EP0OUT_BUF+bmRequestType,7	; is this host->device?
 	bsf	USB_STATE,IS_CONTROL_WRITE		; if so, this is a control write
+; check if bmRequestType is DFU
+	movlw	0x21
+	subwf	BANKED_EP0OUT_BUF+bmRequestType,w
+	andlw	b'01111111'	; mask out MSB
+	bz	_its_a_dfu_transfer
 ; check request number: is it Get Descriptor?
 	movlw	GET_DESCRIPTOR
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
@@ -283,6 +244,49 @@ arm_ep0_out_with_flags			; W specifies STAT flags
 	movwf	BANKED_EP0OUT_CNT
 	bsf	BANKED_EP0OUT_STAT,UOWN	; arm the OUT endpoint
 	return
+
+_its_a_dfu_transfer
+	movfw	BANKED_EP0OUT_BUF+bRequest
+	bz	_dfu_detach	; enum=0
+	decw
+	bz	_dfu_dnload	; enum=1
+	decw
+	bz	_dfu_upload	; enum=2
+	decw
+	bz	_dfu_getstatus	; enum=3
+	decw
+	bz	_dfu_clrstatus	; enum=4
+	decw
+	bz	_dfu_getstate	; enum=5
+	decw
+	bz	_dfu_abort	; enum=6
+
+_dfu_dnload ; temporary: have been unable so far to transfer the rest of the EP0OUT data
+	goto	_usb_ctrl_invalid
+
+_dfu_getstatus
+	movlw	low DFU_STATUS_RESPONSE
+	movwf	EP0_DATA_IN_PTR
+	movlw	6
+	goto	_set_data_in_count_from_w
+_dfu_getstate
+	movlw	low DFU_STATE_RESPONSE
+	movwf	EP0_DATA_IN_PTR
+	movlw	1
+	goto	_set_data_in_count_from_w
+_dfu_upload
+	tstf	BANKED_EP0OUT_BUF+wValueH
+	bnz	_dfu_zero			; if wBlockNum is over 255, this is beyond the memory range of the device
+	bsf	USB_STATE,IS_DFU_TRANSFER	; set flag to divert the transfer
+_dfu_upload_already_happening
+	movlw	EP0_BUF_SIZE
+	goto	_set_data_in_count_from_w
+_dfu_detach
+_dfu_clrstatus
+_dfu_abort
+_dfu_zero
+	movlw	0
+	goto	_set_data_in_count_from_w
 
 ; Finishes a successful SETUP transaction.
 _usb_ctrl_complete
@@ -364,7 +368,6 @@ _usb_set_configuration
 	tstf	BANKED_EP0OUT_BUF+wValueL	; anything other than 0 is valid
 	skpz
 	bsf	USB_STATE,DEVICE_CONFIGURED
-	call	cdc_init
 	goto	_usb_ctrl_complete
 
 ; Handles a Get Configuration request.
@@ -372,7 +375,7 @@ _usb_set_configuration
 _usb_get_configuration
 ; load a pointer to either a 0 or a 1 in ROM
 ; the 0 and 1 have been chosen so that they are adjacent
-	movlw	low CONFIGURATION_0_CONSTANT
+	movlw	low OPPORTUNISTIC_0_CONSTANT
 	btfsc	USB_STATE,DEVICE_CONFIGURED
 	incw
 	movwf	EP0_DATA_IN_PTR
@@ -414,7 +417,9 @@ _check_for_pending_address
 ;;; clobbers:	W, FSR0, FSR1
 ep0_read_in
 	bcf	BANKED_EP0IN_STAT,UOWN	; make sure we have ownership of the buffer
-	clrf	BANKED_EP0IN_CNT	; initialize buffer size to 0
+	clrf	BANKED_EP0IN_CNT	; initialize transmit size to 0
+	btfsc	USB_STATE,IS_DFU_TRANSFER
+	goto	ep0_read_dfu_in
 	tstf	EP0_DATA_IN_COUNT	; do nothing if there are 0 bytes to send
 	retz
 	movfw	EP0_DATA_IN_PTR		; set up source pointer
@@ -435,217 +440,50 @@ _bcopy	sublw	EP0_BUF_SIZE		; have we filled the buffer?
 ; write back the updated source pointer
 _bcdone	movfw	FSR0L
 	movwf	EP0_DATA_IN_PTR
-; if we're sending the configuration descriptor, we need to inject the app's
-; values for bus power/self power and max current consumption
-_check_for_config_bmattributes
-	movlw	(low CONFIGURATION_DESCRIPTOR)+EP0_BUF_SIZE
-	subwf	FSR0L,w
-	bnz	_check_for_config_bmaxpower
-; if we're sending the first 8 bytes of the configuration descriptor,
-; set bit 6 of bmAttributes if the application is self-powered
-	btfsc	APP_POWER_CONFIG,0
-	bsf	BANKED_EP0IN_BUF+7,6
-	return
-_check_for_config_bmaxpower
-	movlw	(low CONFIGURATION_DESCRIPTOR)+(EP0_BUF_SIZE*2)
-	subwf	FSR0L,w
-	retnz
-; if we're sending the second 8 bytes of the configuration descriptor,
-; replace bMaxPower with the app's value
-	movfw	APP_POWER_CONFIG
-	bcf	WREG,0			; value is in the upper 7 bits
-	movwf	BANKED_EP0IN_BUF+0
 	return
 
-
-
-;;; Initializes the buffers for the CDC endpoints (1 OUT, 1 IN, and 2 IN).
-;;; arguments:	none
-;;; returns:	none
-;;; clobbers:	W, BSR=0
-cdc_init
-	banksel	BANKED_EP1OUT_STAT
-	call	arm_ep1_out
-	; arm EP1 IN buffer, clearing data toggle bit
-	clrw
-
-; arms endpoint 1 IN, toggling DTS if W=(1<<DTS)
-arm_ep1_in
-	clrf	BANKED_EP1IN_CNT	; next packet will have 0 length (unless another OUT is received)
-	andwf	BANKED_EP1IN_STAT,f	; clear all bits (except DTS if bit is set in W)
-	xorwf	BANKED_EP1IN_STAT,f	; update data toggle (if bit is set in W)
-	bsf	BANKED_EP1IN_STAT,UOWN
-	return
-
-
-
-;;; Services a transaction on one of the CDC endpoints.
-;;; arguments:	USTAT value in FSR1H
-;;;		BSR=0
-;;; returns:	none
-;;; clobbers:	W, FSR0, FSR1
-usb_service_cdc
-	movlw	(1<<DTS)
-	retbfs	FSR1H,ENDP1		; ignore endpoint 2
-	bbfs	FSR1H,DIR,arm_ep1_in	; if endpoint 1 IN, rearm buffer
-	movf	BANKED_EP1OUT_CNT,f	; test for a zero-length packet
-	bz	arm_ep1_out		; (just ignore them and rearm the OUT buffer)
-	bcf	BANKED_EP1IN_STAT,UOWN
-	call	bootloader_exec_cmd	; execute command; status returned in W
-	banksel	BANKED_EP1IN_BUF
-	movwf	BANKED_EP1IN_BUF	; copy status to IN buffer
-	movlw	1
-	movwf	BANKED_EP1IN_CNT	; output byte count is 1
-	bsf	BANKED_EP1IN_STAT,UOWN
-	; fall through to arm_ep1_out
-
-arm_ep1_out
-	movlw	EP1_OUT_BUF_SIZE	; set CNT
-	movwf	BANKED_EP1OUT_CNT
-	clrf	BANKED_EP1OUT_STAT	; ignore data toggle
-	bsf	BANKED_EP1OUT_STAT,UOWN	; rearm OUT buffer
-	return
-
-
-
-;;; Executes a bootloader command.
-;;; arguments:	command payload in EP1 OUT buffer
-;;; 		BSR=0
-;;; returns:	status code in W
-;;; clobbers:	W, BSR, FSR0, FSR1
-bootloader_exec_cmd
-; check length of data packet
-	movlw	BCMD_SET_PARAMS_LEN
-	subwf	BANKED_EP1OUT_CNT,w
-	bz	_bootloader_set_params
-	movlw	BCMD_WRITE_LEN
-	subwf	BANKED_EP1OUT_CNT,w
-	bz	_bootloader_write
-	movlw	BCMD_RESET_LEN
-	subwf	BANKED_EP1OUT_CNT,w
-	bz	_bootloader_reset
-	retlw	BSTAT_INVALID_COMMAND
-
-; Resets the device if the received byte matches the reset character.
-_bootloader_reset
-	movlw	BCMD_RESET_CHAR
-	subwf	BANKED_EP1OUT_BUF,w	; check received character
-	skpz
-	retlw	BSTAT_INVALID_COMMAND
-; command is valid, reset the device
-	reset
-
-; Sets the write address, expected checksum of the next 32 words,
-; and erases the row at that address if the last byte of the command matches
-; the "erase" character.
-; BSR=0
-_bootloader_set_params
-	movfw	BANKED_EP1OUT_BUF+BCMD_SET_PARAMS_CKSUM	; expected checksum
-	movwf	EXPECTED_CHECKSUM			; save for verification during write command
-	movfw	BANKED_EP1OUT_BUF+BCMD_SET_PARAMS_ERASE
-	movwf	FSR1L	; temp
-	movfw	BANKED_EP1OUT_BUF+BCMD_SET_PARAMS_ADRL	; address lower bits
-	movwf	FSR1H	; temp
-	movfw	BANKED_EP1OUT_BUF+BCMD_SET_PARAMS_ADRH	; address upper bits 
-	banksel	PMADRH
+; copy flash contents (PMDATH/PMDATL) to EP0IN_BUF (FSR1)
+ep0_read_dfu_in
+; BANKED_EP0IN_CNT was already cleared in ep0_read_in
+	ldfsr1d	EP0IN_BUF		; set up destination pointer
+; PMADRH:PMADRL = wValueL << 5
+	movfw	BANKED_EP0OUT_BUF+wValueL
+	banksel	PMADRL
+	clrf	PMCON1
+	clrf	PMADRL
+	lsrf	WREG,f
+	btfsc   STATUS,C
+	bsf	PMADRL,5
+	lsrf	WREG,f
+	btfsc   STATUS,C
+	bsf	PMADRL,6
+	lsrf	WREG,f
+	btfsc   STATUS,C
+	bsf	PMADRL,7
 	movwf	PMADRH
-	movfw	FSR1H	; bring lower bits out of temp
-	movwf	PMADRL
-; do we need to erase?
-	movlw	BCMD_ERASE_CHAR
-	subwf	FSR1L,w
-	skpz
-	retlw	BSTAT_OK	; if no reset command is given, return OK
-
-; Erases the row of flash in PMADRH:PMADRL.
-; BSR=3
-_bootloader_erase
-	movlw	(1<<FREE)|(1<<WREN)	; enable write and erase to program memory
-	movwf	PMCON1
-	call	flash_unlock		; stalls until erase finishes
-_wdone	bcf	PMCON1,WREN		; clear write enable flag
-	retlw	BSTAT_OK
-
-; Verifies that the checksum of the 32 words (64 bytes) in the EP1 OUT buffer
-; matches the previously sent value. If so, the 32 bytes are then written to
-; flash memory at the address in PMADRH:PMADRL. (set by a prior command)
-; BSR=0
-_bootloader_write
-; The expected checksum is the two's complement of the sum of the bytes.
-; If the data is valid, we can add the checksum to the sum of the bytes and
-; the result will be 0. We initialize a temporary register with the expected
-; checksum, and then add each byte to it as it's processed.
-; If the value in the temp register is 0 after all 64 bytes have been copied
-; to the write latches, proceed with the write.
-	movfw	EXPECTED_CHECKSUM
-	movwf	FSR1L			; use a temp for the running checksum
-	ldfsr0d	EP1OUT_BUF		; set up read pointer
-	movlw	(1<<LWLO)|(1<<WREN)	; write to latches only
-	banksel	PMCON1
-	movwf	PMCON1
-; simultaneously compute the checksum of the 32 words and copy them to the
-; write latches
-	movlw	32			; number of words to write minus 1
-	movwf	FSR1H			; used for loop count
-_wloop	moviw	FSR0++			; load lower byte
-	addwf	FSR1L,f			; add lower byte to checksum
-	movwf	PMDATL			; copy to write latch
-	moviw	FSR0++			; load upper byte
-	addwf	FSR1L,f			; add upper byte to checksum
-	movwf	PMDATH			; copy to write latch
-; after writing the 32nd word to PMDATH:PMDATL, don't execute the unlock sequence
-; or advance the address pointer!
-	decf	FSR1H,f			; decrement loop count
-	bz	_wcksum			; if 0, we're done writing to the latches
-; still have more words to go
-	call	flash_unlock		; execute unlock sequence
-	incf	PMADRL,f		; increment write address
-	goto	_wloop
-; verify the checksum
-_wcksum	clrf	PMCON1
-	tstf	FSR1L
-	skpz
-	retlw	BSTAT_INVALID_CHECKSUM	; if there's a mismatch, abort the write
-; checksum is valid, write the data
-	bsf	PMCON1,WREN
-	call	flash_unlock		; stalls until write finishes
-; verify the write: compare each byte in the buffer to its counterpart that
-; was just written to flash.
-; we do this backwards so we don't waste instructions resetting the pointers.
-; (note: PMADRH:PMADRL is already pointing at the last written word, but FSR0
-; is pointing to one byte past the end of the buffer)
-	clrf	PMCON1			; clear write enable
-	bsf	FSR1H,5			; set loop count to 32 (just need to set one bit because it's already 0)
-_vloop	bsf	PMCON1,RD		; read word from flash
+	clrw
+_pmcopy
+	sublw	EP0_BUF_SIZE		; have we filled the buffer?
+	bz	_pmbail
+	banksel	PMADRL
+	bsf	PMCON1,RD		; read word from flash
 	nop				; 2 required nops
 	nop
-	moviw	--FSR0			; get high byte of expected word
-	subwf	PMDATH,w		; compare with high byte written to flash
-	skpz
-	retlw	BSTAT_VERIFY_FAILED
-	moviw	--FSR0			; get low byte of expected word
-	subwf	PMDATL,w		; compare with low byte written to flash
-	skpz
-	retlw	BSTAT_VERIFY_FAILED
-	decf	PMADRL,f		; decrement read address
-	decfsz	FSR1H,f			; decrement loop count
-	goto	_vloop
-	retlw	BSTAT_OK
+	movfw	PMDATL
+	movwi	FSR1++
+	movfw	PMDATH
+	movwi	FSR1++
+	incf	PMADRL,f		; increment LSB of Program Memory address
+	banksel	BANKED_EP0OUT_STAT
+	incf	BANKED_EP0IN_CNT,f	; increase number of bytes copied by two
+	incf	BANKED_EP0IN_CNT,f
+	movfw	BANKED_EP0IN_CNT	; save to test on the next iteration
+	goto	_pmcopy
+_pmbail
+	return
 
 
-;;; Executes the flash unlock sequence, performing an erase or write.
-;;; arguments:	PMCON1 bits CFGS, LWLO, FREE and WREN set appropriately
-;;;		BSR=3
-;;; returns:	none
-;;; clobbers:	W
-flash_unlock
-	movlw	0x55
-	movwf	PMCON2
-	movlw	0xAA
-	movwf	PMCON2
-	bsf	PMCON1,WR
-	nop
-	nop
+; temporary to provide delay for _tflush ; incorporate into flash write
 ret	return
 
 
@@ -662,6 +500,10 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	andwf	OSCSTAT,w
 	sublw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	bnz	_wosc
+
+; do not run application if the watchdog timed out (providing a mechanism for the app to trigger a firmware update)
+	btfss	STATUS,NOT_TO
+	goto	_bootloader_main
 
 ; Check for valid application code: the lower 8 bits of the first word cannot be 0xFF
 	call	app_is_present
@@ -687,19 +529,11 @@ _bootloader_main
 	movlw	(1<<ACTSRC)|(1<<ACTEN)
 	movwf	ACTCON		; source = USB
 
-	if LOGGING_ENABLED
-	call	uart_init
-; Print a power-on character
-	call	log_init
-	logch	'^',LOG_NEWLINE
-	endif
-
 ; Initialize USB
 	call	usb_init
 
 ; Attach to the bus (could be a subroutine, but inlining it saves 2 instructions)
 _usb_attach
-	logch	'A',0
 	banksel	UCON		; reset UCON
 	clrf	UCON
 	banksel	PIE2
@@ -709,7 +543,6 @@ _usb_attach
 _usben	bsf	UCON,USBEN	; enable USB module and wait until ready
 	btfss	UCON,USBEN
 	goto	_usben
-	logch	'!',LOG_NEWLINE
 
 ; Enable interrupts and enter an idle loop
 ; (Loop code is located at the top of the file, in the first 256 words of
@@ -732,32 +565,11 @@ app_is_present
 
 
 
-;;; Gets the application's power config byte and stores it in APP_POWER_CONFIG.
-;;; arguments:	none
-;;; returns:	none
-;;; clobbers:	W, BSR, FSR0
-get_app_power_config
-	banksel	APP_POWER_CONFIG
-	movlw	0x33			; default value: bus-powered, max current 100 mA
-	movwf	APP_POWER_CONFIG
-	call	app_is_present
-	retz				; if Z flag is set, we have no application, just return
-	if LOGGING_ENABLED
-	pagesel	APP_CONFIG
-	endif
-	call	APP_CONFIG		; config value returned in W
-	banksel	APP_POWER_CONFIG
-	movwf	APP_POWER_CONFIG
-	return
-
-
-
 ;;; Initializes the USB system and resets all associated registers.
 ;;; arguments:	none
 ;;; returns:	none
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_init
-	logch	'R',LOG_NEWLINE
 ; disable USB interrupts
 	banksel	PIE2
 	bcf	PIE2,USBIE
@@ -766,6 +578,8 @@ usb_init
 	clrf	UEIR
 	clrf	UIR
 ; disable endpoints we won't use
+	clrf	UEP1
+	clrf	UEP2
 	clrf	UEP3
 	clrf	UEP4
 	clrf	UEP5
@@ -787,8 +601,6 @@ usb_init
 _ramclr	movwi	FSR0++
 	decfsz	FSR1H,f
 	goto	_ramclr
-; get the app's power configuration (if it's present)
-	call	get_app_power_config
 ; reset ping-pong buffers and address
 	banksel	UCON
 	bsf	UCON,PPBRST
@@ -802,41 +614,22 @@ _tflush	btfss	UIR,TRNIF
 	call	ret		; need at least 6 cycles before checking TRNIF again
 	goto	_tflush
 ; initialize endpoints:
-; 0 for control
-; 1 for CDC bulk data
-; 2 for CDC notifications (though it's never actually used)
+; EP0 (in and out) for control
 ; my intuition was that I should wait until a SET_CONFIGURATION is received
 ; before setting up endpoints 1 and 2... but there seemed to be a timing issue
 ; when doing so, so I moved them here
 _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	UEP0
-	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPOUTEN)|(1<<EPINEN)
-	movwf	UEP1
-	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPINEN)
-	movwf	UEP2
 ; initialize endpoint buffers and counts
 	banksel	BANKED_EP0OUT_ADRL
 	movlw	low EP0OUT_BUF	; set endpoint 0 OUT address low
 	movwf	BANKED_EP0OUT_ADRL
 	movlw	low EP0IN_BUF	; set endpoint 0 IN address low
 	movwf	BANKED_EP0IN_ADRL
-	movlw	low EP1OUT_BUF	; set endpoint 1 OUT address low
-	movwf	BANKED_EP1OUT_ADRL
-	movlw	low EP1IN_BUF	; set endpoint 1 IN address low
-	movwf	BANKED_EP1IN_ADRL
 	movlw	EPBUF_ADRH	; set all ADRH values
 	movwf	BANKED_EP0OUT_ADRH
 	movwf	BANKED_EP0IN_ADRH
-	movwf	BANKED_EP1OUT_ADRH
-	movwf	BANKED_EP1IN_ADRH
 	goto	arm_ep0_out
-
-
-
-;;; Includes
-	if LOGGING_ENABLED
-	include "log.asm"
-	endif
 
 
 
@@ -851,11 +644,15 @@ DESCRIPTOR_ADRH	equ	high $
 DEVICE_DESCRIPTOR
 	dt	DEVICE_DESC_LEN	; bLength
 	dt	0x01		; bDescriptorType
-	dt	0x00, 0x02	; bcdUSB (USB 2.0)
-	dt	0x02		; bDeviceClass (communication device)
-	dt	0x00		; bDeviceSubclass
+	; bcdUSB (USB 1.0)
+OPPORTUNISTIC_0_CONSTANT
+	dt	0x00	; bcdUSB LSB
+OPPORTUNISTIC_1_CONSTANT
+	dt	0x01	; bcdUSB MSB
+	dt	0xFE		; bDeviceClass
+	dt	0x01		; bDeviceSubclass
 	dt	0x00		; bDeviceProtocol
-	dt	0x08		; bMaxPacketSize0 (8 bytes)
+	dt	EP0_BUF_SIZE	; bMaxPacketSize0
 	dt	low USB_VENDOR_ID, high USB_VENDOR_ID	; idVendor
 	dt	low USB_PRODUCT_ID, high USB_PRODUCT_ID	; idProduct
 	dt	0x01, 0x00	; bcdDevice (1)
@@ -867,90 +664,34 @@ DEVICE_DESCRIPTOR
 CONFIGURATION_DESCRIPTOR
 	dt	0x09		; bLength
 	dt	0x02		; bDescriptorType
-	dt	CONFIG_DESC_TOTAL_LEN, 0x00	; wTotalLength
-	dt	0x02		; bNumInterfaces
+	dt	low CONFIG_DESC_TOTAL_LEN, high CONFIG_DESC_TOTAL_LEN	; wTotalLength
+	dt	0x01		; bNumInterfaces
 	dt	0x01		; bConfigurationValue
 	dt	0x00		; iConfiguration
 	dt	0x80		; bmAttributes
-	dt	0x11		; bMaxPower
+	dt	0x32		; bMaxPower
 
-INTERFACE_DESCRIPTOR_0
+INTERFACE_DESCRIPTOR
 	dt	0x09		; bLength
 	dt	0x04		; bDescriptorType (INTERFACE)
 	dt	0x00		; bInterfaceNumber
-CONFIGURATION_0_CONSTANT
 	dt	0x00		; bAlternateSetting
-CONFIGURATION_1_CONSTANT
-	dt	0x01		; bNumEndpoints
-	dt	0x02		; bInterfaceClass (communication)
-	dt	0x02		; bInterfaceSubclass (abstract control model)
-	dt	0x01		; bInterfaceProtocol (V.25ter, common AT commands)
-	dt	0x00		; iInterface
-
-	if (CONFIGURATION_0_CONSTANT>>8) != (CONFIGURATION_1_CONSTANT>>8)
-	error "CONSTANT_0 and CONSTANT_1 must be in the same 256-word region"
-	endif
-
-HEADER_FUNCTIONAL_DESCRIPTOR
-	dt	0x05		; bFunctionLength
-	dt	0x24		; bDescriptorType (CS_INTERFACE)
-	dt	0x00		; bDescriptorSubtype (header functional descriptor)
-	dt	0x10,0x01	; bcdCDC (specification version, 1.1)
-
-ABSTRACT_CONTROL_MANAGEMENT_FUNCTIONAL_DESCRIPTOR
-	dt	0x04		; bFunctionLength
-	dt	0x24		; bDescriptorType (CS_INTERFACE)
-	dt	0x02		; bDescriptorSubtype (abstract control management functional descriptor)
-	dt	0x02		; bmCapabilities
-
-UNION_FUNCTIONAL_DESCRIPTOR
-	dt	0x05		; bFunctionLength
-	dt	0x24		; bDescriptorType (CS_INTERFACE)
-	dt	0x06		; bDescriptorSubtype (union functional descriptor)
-	dt	0x00		; bMasterInterface
-	dt	0x01		; bSlaveInterface0
-
-CALL_MANAGEMENT_FUNCTIONAL_DESCRIPTOR
-	dt	0x05		; bFunctionLength
-	dt	0x24		; bDescriptorType (CS_INTERFACE)
-	dt	0x01		; bDescriptorSubtype (call management functional descriptor)
-	dt	0x00		; bmCapabilities (doesn't handle call management)
-	dt	0x01		; dDataInterface
-
-ENDPOINT_DESCRIPTOR_2_IN
-	dt	0x07		; bLength
-	dt	0x05		; bDescriptorType (ENDPOINT)
-	dt	0x82		; bEndpointAddress (2 IN)
-	dt	0x03		; bmAttributes (transfer type: interrupt)
-	dt	0x08, 0x00	; wMaxPacketSize (8)
-	dt	0x7f		; bInterval
-
-INTERFACE_DESCRIPTOR_1
-	dt	0x09		; bLength
-	dt	0x04		; bDescriptorType (INTERFACE)
-	dt	0x01		; bInterfaceNumber
-	dt	0x00		; bAlternateSetting
-	dt	0x02		; bNumEndpoints
-	dt	0x0a		; bInterfaceClass (data)
-	dt	0x00		; bInterfaceSubclass
+	dt	0x00		; bNumEndpoints
+	dt	0xFE		; bInterfaceClass
+	dt	0x01		; bInterfaceSubclass
 	dt	0x00		; bInterfaceProtocol
 	dt	0x00		; iInterface
 
-ENDPOINT_DESCRIPTOR_1_IN
-	dt	0x07		; bLength
-	dt	0x05		; bDescriptorType (ENDPOINT)
-	dt	0x81		; bEndpointAddress (1 IN)
-	dt	0x02		; bmAttributes (transfer type: bulk)
-	dt	0x40, 0x00	; wMaxPacketSize (64)
-	dt	0x00		; bInterval
+	if (OPPORTUNISTIC_0_CONSTANT>>8) != (OPPORTUNISTIC_1_CONSTANT>>8)
+	error "CONSTANT_0 and CONSTANT_1 must be in the same 256-word region"
+	endif
 
-ENDPOINT_DESCRIPTOR_1_OUT
-	dt	0x07		; bLength
-	dt	0x05		; bDescriptorType (ENDPOINT)
-	dt	0x01		; bEndpointAddress (1 OUT)
-	dt	0x02		; bmAttributes (transfer type: bulk)
-	dt	0x40, 0x00	; wMaxPacketSize (64)
-	dt	0x00		; bInterval
+DFU_STATUS_RESPONSE
+	dt	0x00			; bStatus = OK
+	dt	0x00, 0x00, 0x00	; bwPollTimeout
+DFU_STATE_RESPONSE
+	dt	0x02			; bState = dfuIDLE
+	dt	0x00			; iString
 
 ; extract nibbles from serial number
 SN1	equ	(SERIAL_NUMBER>>12) & 0xF

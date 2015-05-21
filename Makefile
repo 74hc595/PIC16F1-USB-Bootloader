@@ -33,10 +33,6 @@ MDB_DEVICE = PIC16F1454
 
 AS = gpasm
 DASM = gpdasm
-MPLABX_DIR = /Applications/microchip/mplabx
-MDB = $(MPLABX_DIR)/mplab_ide.app/Contents/Resources/mplab_ide/bin/mdb.sh
-
-
 
 ########## Make rules ##########
 
@@ -50,16 +46,6 @@ $(HEX): $(ASM)
 dis: $(HEX)
 	$(DASM) -p p$(AS_DEVICE) $(HEX)
 
-# Flash
-flash: $(HEX)
-	@echo "Device $(MDB_DEVICE)" \
-		"\nSet system.disableerrormsg true" \
-		"\nHwtool PICkit3 -p" \
-		"\nSet programoptions.eraseb4program true" \
-		"\nProgram \"$(HEX)\"" \
-		"\nQuit\n" > __prog.cmd
-	@$(MDB) __prog.cmd; status=$$?; rm -f __prog.cmd MPLABXLog.*; exit $$status
-
 # List supported device types
 list-devices:
 	@$(AS) -l
@@ -69,4 +55,3 @@ clean:
 	rm -f $(ASM:.asm=.lst) $(HEX) $(OUT).cod $(OUT).lst
 
 .PHONY: all flash clean list-devices
-
