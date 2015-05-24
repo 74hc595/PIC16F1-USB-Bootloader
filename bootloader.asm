@@ -1,7 +1,6 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
-; this code is in development and not yet functional
-; at the moment, the code only READS, not WRITES, program memory
+; this code is in development and is presently for experimentation only
 ;
 ; USB 512-Word DFU Bootloader for PIC16(L)F1454/5/9
 ; Copyright (c) 2015, Peter Lawrence
@@ -10,6 +9,12 @@
 ; Copyright (c) 2015, Matt Sarnoff (msarnoff.org)
 
 ; Released under a 3-clause BSD license: see the accompanying LICENSE file.
+;
+; the download/upload file is a 16384 byte LSB-first binary (the entire program memory of PIC16F145x)
+; for writes, it doesn't matter what the first 1024 bytes are; _WRT_BOOT protects these
+; dfu-util syntax is:
+;  dfu-util -U read.bin -t 64
+;  dfu-util -D write.bin -t 64
 ;
 ; Bootloader is entered if:
 ; - the MCLR/RA3 pin is grounded at power-up or reset,
@@ -59,12 +64,8 @@
 	errorlevel -302
 
 ;;; Configuration
-WRT_CONFIG		equ	_WRT_BOOT
-
 	__config _CONFIG1, _FOSC_INTOSC & _WDTE_SWDTEN & _PWRTE_ON & _MCLRE_OFF & _CP_ON & _BOREN_ON & _IESO_OFF & _FCMEN_OFF
-	__config _CONFIG2, WRT_CONFIG & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LVP_OFF
-
-
+	__config _CONFIG2, _WRT_BOOT & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LVP_OFF
 
 ;;; Constants and varaiable addresses
 SERIAL_NUMBER_DIGIT_CNT	equ	4
@@ -80,7 +81,7 @@ USB_PRODUCT_ID		equ	0x0001
 
 DEVICE_DESC_LEN		equ	18	; device descriptor length
 CONFIG_DESC_TOTAL_LEN	equ	18	; total length of configuration descriptor and sub-descriptors
-EXTRAS_LEN		equ	6	; total length of extras
+EXTRAS_LEN		equ	11	; total length of extras
 SERIAL_NUM_DESC_LEN	equ	2+(SERIAL_NUMBER_DIGIT_CNT*2)
 ALL_DESCS_TOTAL_LEN	equ	DEVICE_DESC_LEN+CONFIG_DESC_TOTAL_LEN+EXTRAS_LEN+SERIAL_NUM_DESC_LEN
 
@@ -120,7 +121,9 @@ APP_INTERRUPT		equ	BOOTLOADER_SIZE+4
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
 ADDRESS_PENDING		equ	1	; need to set address in next IN transaction
 DEVICE_CONFIGURED	equ	2	; the device is configured
-IS_DFU_TRANSFER		equ	3	; when active, ep0_read_in diverts to an alternate routine
+IS_DFU_UPLOAD		equ	3	; when active, ep0_read_in diverts to an alternate routine
+IS_DFU_DNLOAD		equ	4	; when active, _its_an_out diverts to an alternate routine
+DFU_DNLOAD_ACTIVE	equ	5	; when inactive: state=dfuIDLE, when active: state=dfuDNLOAD-IDLE
 
 ;;; Vectors
 	org	0x0000
@@ -181,6 +184,74 @@ bootloader_main_loop
 _loop
 	goto	_loop
 
+; perform flash unlock sequence
+; BSR=PMADRL
+flash_unlock_sequence
+	movlw	0x55
+	movwf	PMCON2
+	movlw	0xAA
+	movwf	PMCON2
+	bsf	PMCON1,WR
+	nop				; mandatory nops
+	nop
+	return
+
+_its_an_out
+	btfss	USB_STATE,IS_DFU_DNLOAD
+	goto	arm_ep0_out		; it must be a status (or other message whose contents we are not concerned about)
+
+	; I'm genuinely unhappy with the present implementation below
+	; dfu-util (or the USB library it uses) gets impatient and won't wait for multiple milliseconds for the flash operation
+	; this necessitates sending a STATUS, making a quick copy of the data, re-arming OUT, and then doing the flash operation
+	; I believe/hope that there is a better solution, but optimization will take more time
+
+	bcf	BANKED_EP0IN_STAT,UOWN	; ensure we have ownership of the buffer
+	clrf	BANKED_EP0IN_CNT	; we'll be sending a zero-length packet
+	movlw	_DAT1|_DTSEN		; arm IN buffer
+	movwf	BANKED_EP0IN_STAT
+	bsf	BANKED_EP0IN_STAT,UOWN
+
+	ldfsr0d	EP0OUT_BUF		; set up source pointer
+	ldfsr1d	EP_DATA_BUF_END		; set up destination pointer
+out_copy_loop
+	tstf	BANKED_EP0OUT_CNT
+	bz	out_finish
+	moviw	FSR0++
+	movwi	FSR1++
+	decf	BANKED_EP0OUT_CNT,f
+	goto out_copy_loop
+out_finish
+	movlw	_DAT0|_DTSEN|_BSTALL	; make OUT buffer ready for next SETUP packet
+	call	arm_ep0_out_with_flags
+; row of flash data to write is in BANKED_EP0OUT_BUF; PMADRL:PMADRH are already written
+	ldfsr0d	EP_DATA_BUF_END		; set up source pointer
+	banksel	PMADRL
+; erase row
+	bsf	PMCON1,FREE
+	bsf	PMCON1,WREN
+	call	flash_unlock_sequence
+; write row
+	bcf	PMCON1,FREE
+	bsf	PMCON1,LWLO
+	bsf	PMCON1,WREN
+_flash_write_loop
+	moviw	FSR0++
+	movwf	PMDATL
+	moviw	FSR0++
+	movwf	PMDATH
+	movfw	PMADRL
+	andlw	b'00011111'	; mask address to yield row element number
+	sublw	31
+	btfsc	STATUS,Z
+	bcf	PMCON1,LWLO	; we've now written to all the latches; this unlock is going to be special
+	call	flash_unlock_sequence
+	incf	PMADRL,f
+	movfw	PMADRL
+	andlw	b'00011111'	; mask address to yield row element number
+	bnz	_flash_write_loop
+	clrf	PMCON1
+	banksel	BANKED_EP0IN_STAT
+	return
 
 
 ;;; Handles a control transfer on endpoint 0.
@@ -195,14 +266,15 @@ usb_service_ep0
 	movfw	BANKED_EP0OUT_STAT
 	andlw	b'00111100'	; isolate PID bits
 	sublw	PID_SETUP	; is it a SETUP packet?
-	bnz	arm_ep0_out	; if not, it's a regular OUT, just rearm the buffer
+	bnz	_its_an_out	; if not, it's a regular OUT
 	; it's a SETUP packet--fall through
 
 ; Handles a SETUP control transfer on endpoint 0.
 ; BSR=0
 _usb_ctrl_setup
 	bcf	USB_STATE,IS_CONTROL_WRITE
-	bcf	USB_STATE,IS_DFU_TRANSFER
+	bcf	USB_STATE,IS_DFU_UPLOAD
+	bcf	USB_STATE,IS_DFU_DNLOAD
 ; set IS_CONTROL_WRITE bit in USB_STATE according to MSB in bmRequestType
 	btfss	BANKED_EP0OUT_BUF+bmRequestType,7	; is this host->device?
 	bsf	USB_STATE,IS_CONTROL_WRITE		; if so, this is a control write
@@ -210,7 +282,7 @@ _usb_ctrl_setup
 	movlw	0x21
 	subwf	BANKED_EP0OUT_BUF+bmRequestType,w
 	andlw	b'01111111'	; mask out MSB
-	bz	_its_a_dfu_transfer
+	bz	_its_a_dfu_message
 ; check request number: is it Get Descriptor?
 	movlw	GET_DESCRIPTOR
 	subwf	BANKED_EP0OUT_BUF+bRequest,w
@@ -245,7 +317,7 @@ arm_ep0_out_with_flags			; W specifies STAT flags
 	bsf	BANKED_EP0OUT_STAT,UOWN	; arm the OUT endpoint
 	return
 
-_its_a_dfu_transfer
+_its_a_dfu_message
 	movfw	BANKED_EP0OUT_BUF+bRequest
 	bz	_dfu_detach	; enum=0
 	decw
@@ -260,12 +332,31 @@ _its_a_dfu_transfer
 	bz	_dfu_getstate	; enum=5
 	decw
 	bz	_dfu_abort	; enum=6
-
-_dfu_dnload ; temporary: have been unable so far to transfer the rest of the EP0OUT data
 	goto	_usb_ctrl_invalid
 
+_dfu_dnload
+	banksel	UCON
+	bcf	UCON,PKTDIS		; reenable packet processing
+	banksel	BANKED_EP0OUT_STAT
+	movlw	_DAT1|_DTSEN
+	movwf	BANKED_EP0OUT_STAT
+	movlw	EP0_BUF_SIZE		; reset the buffer count
+	movwf	BANKED_EP0OUT_CNT
+	bsf	BANKED_EP0OUT_STAT,UOWN	; arm the OUT endpoint
+	tstf	BANKED_EP0OUT_BUF+wLengthL
+	btfsc	STATUS,Z
+	goto	_dfu_dnload_exit	; wLength is zero, indicating end of download
+	call	set_pm_address
+	bsf	USB_STATE,DFU_DNLOAD_ACTIVE
+	bsf	USB_STATE,IS_DFU_DNLOAD
+	return
+_dfu_dnload_exit
+	bcf	USB_STATE,DFU_DNLOAD_ACTIVE
+	goto	_cwrite			; wLength is zero: there will be no data stage, so treat like control write
 _dfu_getstatus
-	movlw	low DFU_STATUS_RESPONSE
+	movlw	low DFU_STATUS_RESPONSE1
+	btfsc	USB_STATE,DFU_DNLOAD_ACTIVE
+	movlw	low DFU_STATUS_RESPONSE2
 	movwf	EP0_DATA_IN_PTR
 	movlw	6
 	goto	_set_data_in_count_from_w
@@ -277,7 +368,7 @@ _dfu_getstate
 _dfu_upload
 	tstf	BANKED_EP0OUT_BUF+wValueH
 	bnz	_dfu_zero			; if wBlockNum is over 255, this is beyond the memory range of the device
-	bsf	USB_STATE,IS_DFU_TRANSFER	; set flag to divert the transfer
+	bsf	USB_STATE,IS_DFU_UPLOAD		; set flag to divert the transfer
 _dfu_upload_already_happening
 	movlw	EP0_BUF_SIZE
 	goto	_set_data_in_count_from_w
@@ -285,6 +376,8 @@ _dfu_detach
 _dfu_clrstatus
 _dfu_abort
 _dfu_zero
+	bcf	USB_STATE,IS_DFU_UPLOAD
+	bcf	USB_STATE,IS_DFU_DNLOAD
 	movlw	0
 	goto	_set_data_in_count_from_w
 
@@ -319,26 +412,13 @@ _cwrite	bcf	BANKED_EP0IN_STAT,UOWN	; ensure we have ownership of the buffer
 ; BSR=0
 _usb_get_descriptor
 ; check descriptor type
-	movlw	DESC_CONFIG
-	subwf	BANKED_EP0OUT_BUF+wValueH,w
-	bz	_config_descriptor
-	movlw	DESC_STRING
-	subwf	BANKED_EP0OUT_BUF+wValueH,w
-	bz	_string_descriptor
-	movlw	DESC_DEVICE
-	subwf	BANKED_EP0OUT_BUF+wValueH,w
+	decf	BANKED_EP0OUT_BUF+wValueH,w
+	bz	_device_descriptor	; 1=DESC_DEVICE
+	decw
+	bz	_config_descriptor	; 2=DESC_CONFIG
+	decw
 	bnz	_usb_ctrl_invalid
-_device_descriptor
-	movlw	low DEVICE_DESCRIPTOR
-	movwf	EP0_DATA_IN_PTR
-	movlw	DEVICE_DESC_LEN
-	goto	_set_data_in_count_from_w
-_config_descriptor
-	movlw	low CONFIGURATION_DESCRIPTOR
-	movwf	EP0_DATA_IN_PTR
-	movlw	CONFIG_DESC_TOTAL_LEN	; length includes all subordinate descriptors
-	goto	_set_data_in_count_from_w
-_string_descriptor
+_string_descriptor			; 3=DESC_STRING
 ; only one string descriptor (serial number) is supported,
 ; so don't bother checking wValueL
 	movlw	low SERIAL_NUMBER_STRING_DESCRIPTOR
@@ -353,6 +433,16 @@ _set_data_in_count_from_w
 	movfw	BANKED_EP0OUT_BUF+wLengthL
 	movwf	EP0_DATA_IN_COUNT
 	goto	_usb_ctrl_complete
+_device_descriptor
+	movlw	low DEVICE_DESCRIPTOR
+	movwf	EP0_DATA_IN_PTR
+	movlw	DEVICE_DESC_LEN
+	goto	_set_data_in_count_from_w
+_config_descriptor
+	movlw	low CONFIGURATION_DESCRIPTOR
+	movwf	EP0_DATA_IN_PTR
+	movlw	CONFIG_DESC_TOTAL_LEN	; length includes all subordinate descriptors
+	goto	_set_data_in_count_from_w
 
 ; Handles a Set Address request.
 ; The address is actually set in the IN status stage.
@@ -407,46 +497,41 @@ _check_for_pending_address
 	movwf	UADDR
 	return
 
-
+	if ( (DEVICE_DESC_LEN > EP0_BUF_SIZE) || (CONFIG_DESC_TOTAL_LEN > EP0_BUF_SIZE) || (SERIAL_NUM_DESC_LEN > EP0_BUF_SIZE) )
+	error "descriptors must be no more than EP0_BUF_SIZE"
+	endif
 
 ;;; Reads descriptor data from EP0_DATA_IN_PTR, copies it to the EP0 IN buffer,
 ;;; and decrements EP0_DATA_IN_COUNT.
+;;; function simplied since we are assured EP0_DATA_IN_COUNT <= EP0_BUF_SIZE
 ;;; arguments:	BSR=0
-;;; returns:	EP0_DATA_IN_PTRL advanced
-;;;		EP0_DATA_IN_COUNT decremented
+;;; returns:	
 ;;; clobbers:	W, FSR0, FSR1
 ep0_read_in
 	bcf	BANKED_EP0IN_STAT,UOWN	; make sure we have ownership of the buffer
 	clrf	BANKED_EP0IN_CNT	; initialize transmit size to 0
-	btfsc	USB_STATE,IS_DFU_TRANSFER
+	btfsc	USB_STATE,IS_DFU_UPLOAD
 	goto	ep0_read_dfu_in
-	tstf	EP0_DATA_IN_COUNT	; do nothing if there are 0 bytes to send
-	retz
 	movfw	EP0_DATA_IN_PTR		; set up source pointer
 	movwf	FSR0L
 	movlw	DESCRIPTOR_ADRH|0x80
 	movwf	FSR0H
 	ldfsr1d	EP0IN_BUF		; set up destination pointer
-	clrw
 ; byte copy loop
-_bcopy	sublw	EP0_BUF_SIZE		; have we filled the buffer?
-	bz	_bcdone
+_bcopy	tstf	EP0_DATA_IN_COUNT	; do nothing if there are 0 bytes to send
+	retz
 	moviw	FSR0++
 	movwi	FSR1++
 	incf	BANKED_EP0IN_CNT,f	; increase number of bytes copied
-	movfw	BANKED_EP0IN_CNT	; save to test on the next iteration
-	decfsz	EP0_DATA_IN_COUNT,f	; decrement number of bytes remaining
+	decf	EP0_DATA_IN_COUNT,f	; decrement number of bytes remaining
 	goto	_bcopy
-; write back the updated source pointer
-_bcdone	movfw	FSR0L
-	movwf	EP0_DATA_IN_PTR
-	return
 
-; copy flash contents (PMDATH/PMDATL) to EP0IN_BUF (FSR1)
-ep0_read_dfu_in
-; BANKED_EP0IN_CNT was already cleared in ep0_read_in
-	ldfsr1d	EP0IN_BUF		; set up destination pointer
-; PMADRH:PMADRL = wValueL << 5
+;;; Reads wValue from SETUP in EP0 OUT buffer, converts to Physical Memory address,
+;;; and writes it to PMADRL:PMADRH
+;;; returns:	PMADRL, PMADRH, PMCON1
+;;; clobbers:	W, BSL
+set_pm_address
+	; PMADRH:PMADRL = wValueL << 5
 	movfw	BANKED_EP0OUT_BUF+wValueL
 	banksel	PMADRL
 	clrf	PMCON1
@@ -461,6 +546,14 @@ ep0_read_dfu_in
 	btfsc   STATUS,C
 	bsf	PMADRL,7
 	movwf	PMADRH
+	banksel	BANKED_EP0OUT_STAT
+	return
+
+; copy flash contents (PMDATH/PMDATL) to EP0IN_BUF (FSR1)
+ep0_read_dfu_in
+; BANKED_EP0IN_CNT was already cleared in ep0_read_in
+	ldfsr1d	EP0IN_BUF		; set up destination pointer
+	call set_pm_address
 	clrw
 _pmcopy
 	sublw	EP0_BUF_SIZE		; have we filled the buffer?
@@ -686,11 +779,15 @@ INTERFACE_DESCRIPTOR
 	error "CONSTANT_0 and CONSTANT_1 must be in the same 256-word region"
 	endif
 
-DFU_STATUS_RESPONSE
+DFU_STATUS_RESPONSE1
 	dt	0x00			; bStatus = OK
 	dt	0x00, 0x00, 0x00	; bwPollTimeout
 DFU_STATE_RESPONSE
 	dt	0x02			; bState = dfuIDLE
+DFU_STATUS_RESPONSE2
+	dt	0x00			; iString / bStatus = OK
+	dt	0x00, 0x00, 0x00	; bwPollTimeout
+	dt	0x05			; bState = dfuDNLOAD-IDLE
 	dt	0x00			; iString
 
 ; extract nibbles from serial number
