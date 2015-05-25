@@ -68,7 +68,6 @@
 	__config _CONFIG2, _WRT_BOOT & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LPBOR_OFF & _LVP_OFF
 
 ;;; Constants and varaiable addresses
-SERIAL_NUMBER_DIGIT_CNT	equ	4
 	ifndef SERIAL_NUMBER
 	variable SERIAL_NUMBER=0	; Why doesnt 'equ' work here? Go figure
 	endif
@@ -79,6 +78,7 @@ SERIAL_NUMBER_DIGIT_CNT	equ	4
 USB_VENDOR_ID		equ	0x1234
 USB_PRODUCT_ID		equ	0x0001
 
+SERIAL_NUMBER_DIGIT_CNT	equ	8	; length (in unicode characters) of string in SN descriptor
 DEVICE_DESC_LEN		equ	18	; device descriptor length
 CONFIG_DESC_TOTAL_LEN	equ	18	; total length of configuration descriptor and sub-descriptors
 EXTRAS_LEN		equ	11	; total length of extras
@@ -124,6 +124,13 @@ DEVICE_CONFIGURED	equ	2	; the device is configured
 IS_DFU_UPLOAD		equ	3	; when active, ep0_read_in diverts to an alternate routine
 IS_DFU_DNLOAD		equ	4	; when active, _its_an_out diverts to an alternate routine
 DFU_DNLOAD_ACTIVE	equ	5	; when inactive: state=dfuIDLE, when active: state=dfuDNLOAD-IDLE
+
+; scratchpad variables for CRC calculation (which overlap with bootloader variables, but are not used concurrently)
+SCRATCHPAD		equ	0x70
+COUNTDOWN		equ	0x71
+CRCL			equ	0x72
+CRCH			equ	0x73
+ROW_COUNT		equ	0x74
 
 ;;; Vectors
 	org	0x0000
@@ -537,14 +544,11 @@ set_pm_address
 	clrf	PMCON1
 	clrf	PMADRL
 	lsrf	WREG,f
-	btfsc   STATUS,C
-	bsf	PMADRL,5
+	rrf	PMADRL,f
 	lsrf	WREG,f
-	btfsc   STATUS,C
-	bsf	PMADRL,6
+	rrf	PMADRL,f
 	lsrf	WREG,f
-	btfsc   STATUS,C
-	bsf	PMADRL,7
+	rrf	PMADRL,f
 	movwf	PMADRH
 	banksel	BANKED_EP0OUT_STAT
 	return
@@ -559,17 +563,11 @@ read_flash
 _pmcopy
 	sublw	EP0_BUF_SIZE		; have we filled the buffer?
 	bz	_pmbail
-	banksel	PMADRL
-	bsf	PMCON1,RD		; read word from flash
-	nop				; 2 required nops
-	nop
-	movfw	PMDATL
+	call	_core_flash_read
 	movwi	FSR1++
 	movfw	PMDATH
 	movwi	FSR1++
 	incf	PMADRL,f		; increment LSB of Program Memory address
-	btfsc   STATUS,Z
-	incf	PMADRH,f		; increment MSB of Program Memory address
 	banksel	BANKED_EP0OUT_STAT
 	incf	BANKED_EP0IN_CNT,f	; increase number of bytes copied by two
 	incf	BANKED_EP0IN_CNT,f
@@ -577,6 +575,49 @@ _pmcopy
 	goto	_pmcopy
 _pmbail
 ret	return
+
+_core_flash_read
+	banksel	PMADRL
+	bsf	PMCON1,RD		; read word from flash
+	nop				; 2 required nops
+	nop
+	movfw	PMDATL
+	return
+
+_crc_calc
+	call	_core_flash_read
+	call	_core_crc
+	movfw	PMDATH
+	call	_core_crc
+	incf	PMADRL,f		; increment LSB of Program Memory address
+	btfsc   STATUS,Z
+	incf	PMADRH,f		; increment MSB of Program Memory address
+	movfw	PMADRL
+	andlw	b'00011111'
+	bnz	_crc_calc
+	return
+
+_core_crc
+	movwf	SCRATCHPAD
+	movlw	8
+	movwf	COUNTDOWN
+_crc_loop
+	lsrf	CRCH,f
+	rrf	CRCL,f
+	rlf	CRCL,w			; burp C into LSB of WREG
+	xorwf	SCRATCHPAD,w		; XOR WREG with SCRATCHPAD (we only care about bit 0 result)
+	btfss	WREG,0
+	goto	_crc_no_xor
+	movlw	0x23
+	xorwf	CRCH,f
+	movlw	0xB1
+	xorwf	CRCL,f
+_crc_no_xor
+	lsrf	SCRATCHPAD,f
+	decf	COUNTDOWN,f
+	bnz	_crc_loop
+	return	
+
 
 ;;; Main function
 ;;; BSR=1 (OSCCON bank)
@@ -589,17 +630,36 @@ bootloader_start
 	movwf	ACTCON
 
 ; Wait for the oscillator and PLL to stabilize
+; NOTE: remove in a pinch? the time taken below for the CRC calculation *should* be more than the worse case here
 _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	andwf	OSCSTAT,w
 	sublw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	bnz	_wosc
 
+; calc CRC of application (and provide enough delay for the pull-up on RA3/MCLR to work)
+	banksel	PMADRL
+	movlw	low APP_ENTRY_POINT	; set start address of read to beginning of app
+	movwf	PMADRL
+	movlw	high APP_ENTRY_POINT
+	movwf	PMADRH
+	movlw	236			; total rows excluding bootloader and high-endurance flash
+	movwf	ROW_COUNT
+	clrf	CRCL			; initialize CRC value
+	clrf	CRCH
+app_check_loop
+	call	_crc_calc
+	decf	ROW_COUNT,f
+	bnz	app_check_loop
+
+; do not run application if the CRC check fails
+	tstf	CRCL
+	bnz	_bootloader_main
+	tstf	CRCH
+	bnz	_bootloader_main
+
 ; do not run application if the watchdog timed out (providing a mechanism for the app to trigger a firmware update)
 	btfss	STATUS,NOT_TO
 	goto	_bootloader_main
-
-; Check for valid application code
-; TODO
 
 ; We have a valid application? Check if the entry pin is grounded
 	banksel	PORTA
@@ -651,14 +711,6 @@ usb_init
 	banksel	UEIR
 	clrf	UEIR
 	clrf	UIR
-; disable endpoints we won't use
-	clrf	UEP1
-	clrf	UEP2
-	clrf	UEP3
-	clrf	UEP4
-	clrf	UEP5
-	clrf	UEP6
-	clrf	UEP7
 ; set configuration
 	clrf	UEIE		; don't need any error interrupts
 	movlw	(1<<UPUEN)|(1<<FSEN)
@@ -777,9 +829,15 @@ SN2	equ	(SERIAL_NUMBER>>8) & 0xF
 SN3	equ	(SERIAL_NUMBER>>4) & 0xF
 SN4	equ	SERIAL_NUMBER & 0xF
 
+; the objective here *SHOULD* be to SQTP program globally unique values in production
+; this data then doubles as a unique serial number that can be used by the user app
 SERIAL_NUMBER_STRING_DESCRIPTOR
 	dt	SERIAL_NUM_DESC_LEN	; bLength
 	dt	0x03		; bDescriptorType (STRING)
+	dt	'0'                , 0x00
+	dt	'0'                , 0x00
+	dt	'0'                , 0x00
+	dt	'0'                , 0x00
 	dt	'0'+SN1+((SN1>9)*7), 0x00	; convert hex digits to ASCII
 	dt	'0'+SN2+((SN2>9)*7), 0x00
 	dt	'0'+SN3+((SN3>9)*7), 0x00

@@ -1,7 +1,9 @@
 /*
     command-line tool to convert PIC16F1454 Intel Hex to DFU binary
-
     Copyright (C) 2015 Peter Lawrence
+
+	This was written to generate binaries to use with this bootloader:
+  	https://github.com/majbthrd/PIC16F1-USB-DFU-Bootloader
 
     Permission is hereby granted, free of charge, to any person obtaining a 
     copy of this software and associated documentation files (the "Software"), 
@@ -26,20 +28,24 @@
 #include <string.h>
 #include <malloc.h>
 
-#define PM_SIZE 16384
+#define PM_SIZE_IN_BYTES		 16384
+#define	CODE_OFFSET_ADDRESS		 0x200
+#define	HIGH_ENDURANCE_ADDRESS	0x1F80
 
 static unsigned readhex(const char *text, unsigned digits);
+static unsigned calc_crc(unsigned data, unsigned crc);
 
 int main(int argc, char *argv[])
 {
 	FILE *input, *output;
 	char line[256];
-	unsigned count, address;
+	unsigned count, address, next_address, crc;
 	const char *ptr;
 	struct
 	{
 		unsigned out_of_bounds:1;
 		unsigned extended:1;
+		unsigned crc_overlap:1;
 	} flags;
 	unsigned char *image;
 
@@ -49,7 +55,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	image = (unsigned char *)malloc(PM_SIZE);
+	image = (unsigned char *)malloc(PM_SIZE_IN_BYTES);
 
 	if (NULL == image)
 	{
@@ -73,7 +79,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	for (address = 0; address < PM_SIZE; address += 2)
+	for (address = 0; address < PM_SIZE_IN_BYTES; address += 2)
 	{
 		image[address + 0] = 0xFF;
 		image[address + 1] = 0x3F;
@@ -113,12 +119,33 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (flags.out_of_bounds)
-		fprintf(stderr, "WARNING: supplied input file is faulty and used out-of-bounds addresses\n");
-
 	fclose(input);
 
-	fwrite(image, 1, PM_SIZE, output);
+	if (flags.out_of_bounds)
+		fprintf(stderr, "ERROR: supplied input file is faulty and used out-of-bounds addresses\n");
+
+	address = CODE_OFFSET_ADDRESS << 1; crc = 0;
+	for (;;)
+	{
+		next_address = address + 2;
+		if ((HIGH_ENDURANCE_ADDRESS << 1) == next_address)
+		{
+			flags.crc_overlap = (0xFF != image[address + 0]) || (0x3F != image[address + 1]);
+			image[address + 0] = (crc & 0x00FF);
+			image[address + 1] = (crc & 0xFF00) >> 8;
+			break;
+		}
+		else
+		{
+			crc = calc_crc((unsigned)image[address + 0] + ((unsigned)image[address + 1] << 8), crc);
+			address = next_address;
+		}
+	}
+
+	if (flags.crc_overlap)
+		fprintf(stderr, "ERROR: CRC address was occupied; app is in conflict with bootloader\n");
+
+	fwrite(image, 1, PM_SIZE_IN_BYTES, output);
 	fclose(output);
 
 	free(image);
@@ -146,3 +173,25 @@ static unsigned readhex(const char *text, unsigned digits)
 
 	return result;
 }
+
+static unsigned calc_crc(unsigned data, unsigned crc)
+{
+	unsigned bit, result;
+
+	/*
+	this is a modified CRC-14:
+	it shifts in 16 (rather than 14) bits
+	*/
+
+	for (bit = 0; bit < 16; bit++)
+	{
+		result = (data & 0x0001) ^ (crc & 0x0001);
+		crc >>= 1;
+		if (result)
+			crc ^= 0x23B1;
+		data >>= 1;
+	}
+
+	return crc;
+}
+
