@@ -65,7 +65,7 @@
 
 ;;; Configuration
 	__config _CONFIG1, _FOSC_INTOSC & _WDTE_SWDTEN & _PWRTE_ON & _MCLRE_OFF & _CP_ON & _BOREN_ON & _IESO_OFF & _FCMEN_OFF
-	__config _CONFIG2, _WRT_BOOT & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LVP_OFF
+	__config _CONFIG2, _WRT_BOOT & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LPBOR_OFF & _LVP_OFF
 
 ;;; Constants and varaiable addresses
 SERIAL_NUMBER_DIGIT_CNT	equ	4
@@ -114,8 +114,8 @@ USED_RAM_LEN		equ	EP_DATA_BUF_END-BDT_START
 BOOTLOADER_SIZE		equ	0x200
 
 ; Application code locations
-APP_ENTRY_POINT		equ	BOOTLOADER_SIZE
-APP_INTERRUPT		equ	BOOTLOADER_SIZE+4
+APP_ENTRY_POINT		equ	0x200
+APP_INTERRUPT		equ	APP_ENTRY_POINT+4
 
 ; USB_STATE bit flags
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
@@ -553,7 +553,8 @@ set_pm_address
 ep0_read_dfu_in
 ; BANKED_EP0IN_CNT was already cleared in ep0_read_in
 	ldfsr1d	EP0IN_BUF		; set up destination pointer
-	call set_pm_address
+	call	set_pm_address
+read_flash
 	clrw
 _pmcopy
 	sublw	EP0_BUF_SIZE		; have we filled the buffer?
@@ -567,19 +568,15 @@ _pmcopy
 	movfw	PMDATH
 	movwi	FSR1++
 	incf	PMADRL,f		; increment LSB of Program Memory address
+	btfsc   STATUS,Z
+	incf	PMADRH,f		; increment MSB of Program Memory address
 	banksel	BANKED_EP0OUT_STAT
 	incf	BANKED_EP0IN_CNT,f	; increase number of bytes copied by two
 	incf	BANKED_EP0IN_CNT,f
 	movfw	BANKED_EP0IN_CNT	; save to test on the next iteration
 	goto	_pmcopy
 _pmbail
-	return
-
-
-; temporary to provide delay for _tflush ; incorporate into flash write
 ret	return
-
-
 
 ;;; Main function
 ;;; BSR=1 (OSCCON bank)
@@ -587,6 +584,9 @@ bootloader_start
 ; Configure the oscillator (48MHz from INTOSC using 3x PLL)
 	movlw	(1<<SPLLEN)|(1<<SPLLMULT)|(1<<IRCF3)|(1<<IRCF2)|(1<<IRCF1)|(1<<IRCF0)
 	movwf	OSCCON
+
+	movlw	(1<<ACTEN)|(1<<ACTSRC)
+	movwf	ACTCON
 
 ; Wait for the oscillator and PLL to stabilize
 _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
@@ -598,9 +598,8 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	btfss	STATUS,NOT_TO
 	goto	_bootloader_main
 
-; Check for valid application code: the lower 8 bits of the first word cannot be 0xFF
-	call	app_is_present
-	bz	_bootloader_main	; if we have no application, enter bootloader mode
+; Check for valid application code
+; TODO
 
 ; We have a valid application? Check if the entry pin is grounded
 	banksel	PORTA
@@ -610,9 +609,6 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 ; We have a valid application and the entry pin is high. Start the application.
 	banksel	OPTION_REG
 	bsf	OPTION_REG,NOT_WPUEN	; but first, disable weak pullups
-	if APP_ENTRY_POINT>=2048
-	pagesel	APP_ENTRY_POINT
-	endif
 	goto	APP_ENTRY_POINT
 
 ; Not entering application code: initialize the USB interface and wait for commands.
@@ -641,21 +637,6 @@ _usben	bsf	UCON,USBEN	; enable USB module and wait until ready
 ; (Loop code is located at the top of the file, in the first 256 words of
 ; program memory)
 	goto	bootloader_main_loop
-
-
-
-;;; Determines if application code is present in flash memory.
-;;; arguments:	none
-;;; returns:	Z flag cleared if application code is present
-;;; clobbers:	W, FSR0
-app_is_present
-	clrf	FSR0L
-	movlw	(high APP_ENTRY_POINT)|0x80	; need to set high bit to indicate program memory
-	movwf	FSR0H
-	moviw	FSR0
-	incw				; if W was 0xFF, it'll be 0 now
-	return				; Z flag will be unset if app code is present
-
 
 
 ;;; Initializes the USB system and resets all associated registers.
