@@ -1,6 +1,6 @@
 ; vim:noet:sw=8:ts=8:ai:syn=pic
 ;
-; this code is in development and is presently for experimentation only
+; this code is basically functional; it does need a USB VID:PID
 ;
 ; USB 512-Word DFU Bootloader for PIC16(L)F1454/5/9
 ; Copyright (c) 2015, Peter Lawrence
@@ -15,15 +15,15 @@
 ; dfu-util syntax is:
 ;  dfu-util -U read.bin -t 64
 ;  dfu-util -D write.bin -t 64
+; the download file must incorporate a valid CRC-14 for the bootloader to consider it valid
 ;
 ; Bootloader is entered if:
 ; - the MCLR/RA3 pin is grounded at power-up or reset,
 ; (The internal pull-up is used; no external resistor is necessary.)
-; - there is no application programmed,
+; - there is no valid application programmed,
 ; - the watchdog timed out
 ;
-; To be detected as a valid application, the lower 8 bytes of the first
-; instruction word must NOT be 0xFF.
+; A pre-computed CRC-14 at 0x1F7F confirms a valid application.
 ;
 ; At application start, the device is configured with a 48MHz CPU clock,
 ; using the internal oscillator and 3x PLL. If a different oscillator
