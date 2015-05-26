@@ -37,5 +37,5 @@ dfu-util -D write.bin -t 64
 
 ## License
 
-The contents of this repository is released under a [3-clause BSD license](LICENSE).
+The contents of this repository is released under a [3-clause BSD license](https://raw.githubusercontent.com/majbthrd/PIC16F1-USB-DFU-Bootloader/master/firmware/LICENSE).
 
