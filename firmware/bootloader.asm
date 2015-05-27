@@ -41,10 +41,6 @@
 ;   Labels that begin with an underscore are not safe to call, they should only
 ;   be reached via goto.
 ;
-; - FSR0L, FSR0H, FSR1L, and FSR1H are used as temporary registers in several
-;   places, e.g. as loop counters. They're accessible regardless of the current
-;   bank, and automatically saved/restored on interrupt. Neato!
-;
 ; - As much stuff as possible is packed into bank 0 of USB RAM. This includes the
 ;   buffer descriptors, bootloader state, and endpoint 0 OUT and IN buffers
 ;
@@ -143,53 +139,8 @@ RESET_VECT
 
 	org	0x0004
 INTERRUPT_VECT
-; check the high byte of the return address (at the top of the stack)
-	banksel	TOSH
-; for 512-word mode: if TOSH == 0, we're in the bootloader
-; if TOSH != 0, jump to the application interrupt handler
-	tstf	TOSH
-	bnz	APP_INTERRUPT
-
-; executing from the bootloader? it's a USB interrupt
-_bootloader_interrupt
-	banksel	UIR
-; reset?
-	btfss	UIR,URSTIF
-	goto	_utrans		; not a reset? just start servicing transactions
-	call	usb_init	; if so, reset the USB interface (clears interrupts)
-	banksel	PIE2
-	bsf	PIE2,USBIE	; reenable USB interrupts
-	banksel	UIR
-	bcf	UIR,URSTIF	; clear the flag
-; service transactions
-_utrans	banksel	UIR
-	btfss	UIR,TRNIF
-	goto	_usdone
-	movfw	USTAT		; stash the status in a temp register
-	movwf	FSR1H
-	bcf	UIR,TRNIF	; clear flag and advance USTAT fifo
-	banksel	BANKED_EP0OUT_STAT
-	andlw	b'01111000'	; check endpoint number
-	bnz	_usdone		; bail if not endpoint 0
-	call	usb_service_ep0	; handle the control message
-	goto	_utrans
-; clear USB interrupt
-_usdone	banksel	PIR2
-	bcf	PIR2,USBIF
-	retfie
-
-
-
-;;; Idle loop. In bootloader mode, the MCU just spins here, and all USB
-;;; communication is interrupt-driven.
-;;; This snippet is deliberately located within the first 256 words of program
-;;; memory, so we can easily check in the interrupt handler if the interrupt
-;;; occurred while executing application code or bootloader code.
-;;; (TOSH will be 0x00 when executing bootloader code, i.e. this snippet)
-bootloader_main_loop
-	bsf	INTCON,GIE	; enable interrupts
-_loop
-	goto	_loop
+	movlp	0x2			; XC8 *expects* this
+	goto	APP_INTERRUPT
 
 ; perform flash unlock sequence
 ; BSR=PMADRL
@@ -626,6 +577,7 @@ bootloader_start
 	movlw	(1<<SPLLEN)|(1<<SPLLMULT)|(1<<IRCF3)|(1<<IRCF2)|(1<<IRCF1)|(1<<IRCF0)
 	movwf	OSCCON
 
+; Enable active clock tuning
 	movlw	(1<<ACTEN)|(1<<ACTSRC)
 	movwf	ACTCON
 
@@ -673,29 +625,43 @@ app_check_loop
 
 ; Not entering application code: initialize the USB interface and wait for commands.
 _bootloader_main
-; Enable active clock tuning
-	banksel	ACTCON
-	movlw	(1<<ACTSRC)|(1<<ACTEN)
-	movwf	ACTCON		; source = USB
 
 ; Initialize USB
 	call	usb_init
+
 
 ; Attach to the bus (could be a subroutine, but inlining it saves 2 instructions)
 _usb_attach
 	banksel	UCON		; reset UCON
 	clrf	UCON
-	banksel	PIE2
-	bsf	PIE2,USBIE	; enable USB interrupts
-	bsf	INTCON,PEIE
 	banksel	UCON
 _usben	bsf	UCON,USBEN	; enable USB module and wait until ready
 	btfss	UCON,USBEN
 	goto	_usben
 
-; Enable interrupts and enter an idle loop
-; (Loop code is located at the top of the file, in the first 256 words of
-; program memory)
+bootloader_main_loop
+	banksel	UIR
+; reset?
+	btfss	UIR,URSTIF
+	goto	_utrans		; not a reset? just start servicing transactions
+	call	usb_init	; if so, reset the USB interface (clears interrupts)
+	banksel	UIR
+	bcf	UIR,URSTIF	; clear the flag
+; service transactions
+_utrans	banksel	UIR
+	btfss	UIR,TRNIF
+	goto	_usdone
+	movfw	USTAT		; stash the status in a temp register
+	movwf	FSR1H
+	bcf	UIR,TRNIF	; clear flag and advance USTAT fifo
+	banksel	BANKED_EP0OUT_STAT
+	andlw	b'01111000'	; check endpoint number
+	bnz	_usdone		; bail if not endpoint 0
+	call	usb_service_ep0	; handle the control message
+	goto	_utrans
+; clear USB interrupt
+_usdone	banksel	PIR2
+	bcf	PIR2,USBIF
 	goto	bootloader_main_loop
 
 
@@ -704,19 +670,12 @@ _usben	bsf	UCON,USBEN	; enable USB module and wait until ready
 ;;; returns:	none
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_init
-; disable USB interrupts
-	banksel	PIE2
-	bcf	PIE2,USBIE
 ; clear USB registers
 	banksel	UEIR
 	clrf	UEIR
 	clrf	UIR
-; set configuration
-	clrf	UEIE		; don't need any error interrupts
 	movlw	(1<<UPUEN)|(1<<FSEN)
 	movwf	UCFG		; enable pullups, full speed, no ping-pong buffering
-	movlw	(1<<TRNIE)|(1<<URSTIE)
-	movwf	UIE		; only need interrupts for transaction complete and reset
 ; clear all BDT entries, variables, and buffers
 	clrf	FSR0L
 	movlw	high BDT_START	; BDT starts at 0x2000
