@@ -111,7 +111,7 @@ BOOTLOADER_SIZE		equ	0x200
 
 ; Application code locations
 APP_ENTRY_POINT		equ	0x200
-APP_INTERRUPT		equ	APP_ENTRY_POINT+4
+APP_INTERRUPT		equ	(APP_ENTRY_POINT+4)
 
 ; USB_STATE bit flags
 IS_CONTROL_WRITE	equ	0	; current endpoint 0 transaction is a control write
@@ -139,7 +139,7 @@ RESET_VECT
 
 	org	0x0004
 INTERRUPT_VECT
-	movlp	0x2			; XC8 *expects* this
+	movlp	high APP_INTERRUPT	; XC8 *expects* this
 	goto	APP_INTERRUPT
 
 ; perform flash unlock sequence
@@ -577,16 +577,16 @@ bootloader_start
 	movlw	(1<<SPLLEN)|(1<<SPLLMULT)|(1<<IRCF3)|(1<<IRCF2)|(1<<IRCF1)|(1<<IRCF0)
 	movwf	OSCCON
 
-; Enable active clock tuning
-	movlw	(1<<ACTEN)|(1<<ACTSRC)
-	movwf	ACTCON
-
 ; Wait for the oscillator and PLL to stabilize
 ; NOTE: remove in a pinch? the time taken below for the CRC calculation *should* be more than the worse case here
 _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	andwf	OSCSTAT,w
 	sublw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	bnz	_wosc
+
+; Enable active clock tuning
+	movlw	(1<<ACTEN)|(1<<ACTSRC)
+	movwf	ACTCON
 
 ; calc CRC of application (and provide enough delay for the pull-up on RA3/MCLR to work)
 	banksel	PMADRL
@@ -621,6 +621,7 @@ app_check_loop
 ; We have a valid application and the entry pin is high. Start the application.
 	banksel	OPTION_REG
 	bsf	OPTION_REG,NOT_WPUEN	; but first, disable weak pullups
+	movlp	high APP_ENTRY_POINT	; attempt to appease certain user apps
 	goto	APP_ENTRY_POINT
 
 ; Not entering application code: initialize the USB interface and wait for commands.
