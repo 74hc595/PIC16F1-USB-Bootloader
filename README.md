@@ -23,16 +23,13 @@ For MPLAB/XC8 compilation, the following options are needed:
 The utility provided in the ./tools/ subdirectory converts a .hex file into a CRC-14 protected binary image:
 
 ```
-454hex2bin foo.hex foo.bin
+454hex2dfu foo.hex foo.dfu
 ```
 
 Downloading can be accomplished with the existing [dfu-util](http://dfu-util.sourceforge.net/) utilities:
 
 ```
-dfu-util -U read.bin
-```
-```
-dfu-util -D write.bin
+dfu-util -D write.dfu
 ```
 
 ## License
