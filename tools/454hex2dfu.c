@@ -44,12 +44,12 @@ int main(int argc, char *argv[])
 {
 	FILE *input, *output;
 	char line[256];
-	unsigned count, address, next_address, crc;
+	unsigned address, upper_address;
+	unsigned count, next_address, crc;
 	const char *ptr;
 	struct
 	{
 		unsigned out_of_bounds:1;
-		unsigned extended:1;
 		unsigned crc_overlap:1;
 	} flags;
 	unsigned char *image, *suffix;
@@ -91,6 +91,7 @@ int main(int argc, char *argv[])
 	}
 
 	memset(&flags, 0, sizeof(flags));
+	upper_address = 0;
 
 	while (!feof(input))
 	{
@@ -100,7 +101,7 @@ int main(int argc, char *argv[])
 			{
 				count = readhex(line + 1, 2);
 				address = readhex(line + 3, 4);
-				if (0 == strncmp(line + 7, "00", 2) && !flags.extended) /* data record */
+				if (0 == strncmp(line + 7, "00", 2) && (0 == upper_address)) /* data record */
 				{
 					ptr = line + 9;
 					while (count--)
@@ -112,9 +113,9 @@ int main(int argc, char *argv[])
 						address++; ptr += 2;
 					}
 				}
-				else if (0 == strncmp(line + 7, "04", 2)) /* subsequent data is not program code */
+				else if (0 == strncmp(line + 7, "04", 2)) /* encoding of upper 16-bits (non-zero indicates not part of program memory) */
 				{
-					flags.extended = 1;
+					upper_address = readhex(line + 9, 4);
 				}
 				else if (0 == strncmp(line + 7, "01", 2)) /* end of file record */
 				{
