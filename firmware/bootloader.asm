@@ -76,7 +76,7 @@ USB_PRODUCT_ID		equ	0x0001
 
 SERIAL_NUMBER_DIGIT_CNT	equ	8	; length (in unicode characters) of string in SN descriptor
 DEVICE_DESC_LEN		equ	18	; device descriptor length
-CONFIG_DESC_TOTAL_LEN	equ	18	; total length of configuration descriptor and sub-descriptors
+CONFIG_DESC_TOTAL_LEN	equ	27	; total length of configuration descriptor and sub-descriptors
 EXTRAS_LEN		equ	11	; total length of extras
 SERIAL_NUM_DESC_LEN	equ	2+(SERIAL_NUMBER_DIGIT_CNT*2)
 ALL_DESCS_TOTAL_LEN	equ	DEVICE_DESC_LEN+CONFIG_DESC_TOTAL_LEN+EXTRAS_LEN+SERIAL_NUM_DESC_LEN
@@ -766,6 +766,16 @@ INTERFACE_DESCRIPTOR
 	dt	0x01		; bInterfaceSubclass
 	dt	0x00		; bInterfaceProtocol
 	dt	0x00		; iInterface
+
+; omit in a pinch?  at nine words (plus change to CONFIG_DESC_TOTAL_LEN), this is a rather 
+; expensive way to allow the user to omit the "-t 64" argument (and warning message) for dfu_utils
+FUNCTIONAL_DESCRIPTOR
+	dt	0x09		; bLength
+	dt	0x21		; bDescriptorType (DFU)
+	dt	0x03		; bmAttributes
+	dt	0x00, 0x00	; wDetachTimeout
+	dt	low EP0_BUF_SIZE, high EP0_BUF_SIZE	; wTransferSize
+	dt	0x00, 0x01	; bcdDFUversion
 
 	if (OPPORTUNISTIC_0_CONSTANT>>8) != (OPPORTUNISTIC_1_CONSTANT>>8)
 	error "CONSTANT_0 and CONSTANT_1 must be in the same 256-word region"

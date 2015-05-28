@@ -29,10 +29,10 @@ The utility provided in the ./tools/ subdirectory converts a .hex file into a CR
 Downloading can be accomplished with the existing [dfu-util](http://dfu-util.sourceforge.net/) utilities:
 
 ```
-dfu-util -U read.bin -t 64
+dfu-util -U read.bin
 ```
 ```
-dfu-util -D write.bin -t 64
+dfu-util -D write.bin
 ```
 
 ## License
