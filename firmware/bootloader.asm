@@ -59,11 +59,19 @@
 	list
 	errorlevel -302
 
+;;; Compile options
+; there is a genuine upside to a globally unique serial number (in a known memory location) programmed at the factory
+; however, for hobbyists compiling this code, it is highly problematic to ensure uniqueness
+; USB does not require serial numbers; their operational advantage is when resolving multiple devices plugged into the same computer
+; if multiple devices with the same serial number are inserted at the same time to a computer, problems may result
+; so, the operationally safe solution for this bootloader is to enable "HIDE_SERIAL_NUMBER" to prevent possible conflicts
+HIDE_SERIAL_NUMBER	equ	1
+
 ;;; Configuration
 	__config _CONFIG1, _FOSC_INTOSC & _WDTE_SWDTEN & _PWRTE_ON & _MCLRE_OFF & _CP_ON & _BOREN_ON & _IESO_OFF & _FCMEN_OFF
 	__config _CONFIG2, _WRT_BOOT & _CPUDIV_NOCLKDIV & _USBLSCLK_48MHz & _PLLMULT_3x & _PLLEN_ENABLED & _STVREN_ON & _BORV_LO & _LPBOR_OFF & _LVP_OFF
 
-;;; Constants and varaiable addresses
+;;; Constants and variable addresses
 	ifndef SERIAL_NUMBER
 	variable SERIAL_NUMBER=0	; Why doesnt 'equ' work here? Go figure
 	endif
@@ -379,9 +387,13 @@ _usb_get_descriptor
 _string_descriptor			; 3=DESC_STRING
 ; only one string descriptor (serial number) is supported,
 ; so don't bother checking wValueL
-	movlw	low SERIAL_NUMBER_STRING_DESCRIPTOR
-	movwf	EP0_DATA_IN_PTR
-	movlw	SERIAL_NUM_DESC_LEN
+	if HIDE_SERIAL_NUMBER
+		clrw
+	else
+		movlw	low SERIAL_NUMBER_STRING_DESCRIPTOR
+		movwf	EP0_DATA_IN_PTR
+		movlw	SERIAL_NUM_DESC_LEN
+	endif
 _set_data_in_count_from_w
 	movwf	EP0_DATA_IN_COUNT
 ; the count needs to be set to the minimum of the descriptor's length (in W)
@@ -744,7 +756,11 @@ OPPORTUNISTIC_1_CONSTANT
 	dt	0x01, 0x00	; bcdDevice (1)
 	dt	0x00		; iManufacturer
 	dt	0x00		; iProduct
-	dt	0x01		; iSerialNumber
+	if HIDE_SERIAL_NUMBER
+		dt	0x00		; iSerialNumber
+	else
+		dt	0x01		; iSerialNumber
+	endif
 	dt	0x01		; bNumConfigurations
 
 CONFIGURATION_DESCRIPTOR
