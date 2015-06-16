@@ -26,7 +26,7 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <malloc.h>
+#include <stdlib.h>
 #include <assert.h>
 
 #define PM_SIZE_IN_BYTES		 16384
