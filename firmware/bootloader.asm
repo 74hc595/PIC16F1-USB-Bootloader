@@ -76,11 +76,10 @@ HIDE_SERIAL_NUMBER	equ	1
 	variable SERIAL_NUMBER=0	; Why doesnt 'equ' work here? Go figure
 	endif
 
-; these values are temporary and for development testing only
 ; If your organization has its own vendor ID/product ID, substitute it here.
 ; the VID:PID for the DFU bootloader must be distinct from the product itself, as Windows insists on it
-USB_VENDOR_ID		equ	0x1234
-USB_PRODUCT_ID		equ	0x0001
+USB_VENDOR_ID		equ	0x1209
+USB_PRODUCT_ID		equ	0x2002
 
 SERIAL_NUMBER_DIGIT_CNT	equ	8	; length (in unicode characters) of string in SN descriptor
 DEVICE_DESC_LEN		equ	18	; device descriptor length

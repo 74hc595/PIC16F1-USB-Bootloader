@@ -1,7 +1,9 @@
 USB DFU Bootloader for PIC16F1454/5/9
 =====================================
 
-This bootloader still needs a USB VID:PID.  It has been tested with Linux, Windows, and MacOS.
+This bootloader has been tested with Linux, Windows, and MacOS.
+
+Thank you to [pidcodes](http://pid.codes/) for assigning a USB VID:PID.
 
 Matt Sarnoff demonstrated what is possible with his excellent hand-optimized assembly [512 word USB Bootloader](https://github.com/74hc595/PIC16F1-USB-Bootloader).
 

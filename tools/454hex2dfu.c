@@ -33,8 +33,8 @@
 #define	CODE_OFFSET_ADDRESS		 0x200
 #define	HIGH_ENDURANCE_ADDRESS	0x1F80
 #define DFU_SUFFIX				    16
-#define USB_PRODUCT_ID			0x0001
-#define USB_VENDOR_ID			0x1234
+#define USB_PRODUCT_ID			0x2002
+#define USB_VENDOR_ID			0x1209
 
 static unsigned readhex(const char *text, unsigned digits);
 static unsigned calc_modified_crc14(unsigned data, unsigned crc);
