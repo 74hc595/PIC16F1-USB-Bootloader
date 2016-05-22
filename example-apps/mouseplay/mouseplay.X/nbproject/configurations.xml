@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configurationDescriptor version="62">
+  <logicalFolder name="root" displayName="root" projectFiles="true">
+    <logicalFolder name="HeaderFiles"
+                   displayName="Header Files"
+                   projectFiles="true">
+    </logicalFolder>
+    <logicalFolder name="LinkerScript"
+                   displayName="Linker Files"
+                   projectFiles="true">
+    </logicalFolder>
+    <logicalFolder name="SourceFiles"
+                   displayName="Source Files"
+                   projectFiles="true">
+      <itemPath>../main.c</itemPath>
+      <itemPath>../usb.c</itemPath>
+      <itemPath>../usb_descriptors.c</itemPath>
+      <itemPath>../usb_hid.c</itemPath>
+    </logicalFolder>
+    <logicalFolder name="ExternalFiles"
+                   displayName="Important Files"
+                   projectFiles="false">
+      <itemPath>Makefile</itemPath>
+    </logicalFolder>
+  </logicalFolder>
+  <sourceRootList>
+    <Elem>..</Elem>
+  </sourceRootList>
+  <projectmakefile>Makefile</projectmakefile>
+  <confs>
+    <conf name="default" type="2">
+      <toolsSet>
+        <developmentServer>localhost</developmentServer>
+        <targetDevice>PIC16F1454</targetDevice>
+        <targetHeader></targetHeader>
+        <targetPluginBoard></targetPluginBoard>
+        <platformTool>Simulator</platformTool>
+        <languageToolchain>XC8</languageToolchain>
+        <languageToolchainVersion>1.21</languageToolchainVersion>
+        <platform>3</platform>
+      </toolsSet>
+      <compileType>
+        <linkerTool>
+          <linkerLibItems>
+          </linkerLibItems>
+        </linkerTool>
+        <loading>
+          <useAlternateLoadableFile>false</useAlternateLoadableFile>
+          <alternateLoadableFile></alternateLoadableFile>
+        </loading>
+      </compileType>
+      <makeCustomizationType>
+        <makeCustomizationPreStepEnabled>false</makeCustomizationPreStepEnabled>
+        <makeCustomizationPreStep></makeCustomizationPreStep>
+        <makeCustomizationPostStepEnabled>false</makeCustomizationPostStepEnabled>
+        <makeCustomizationPostStep></makeCustomizationPostStep>
+        <makeCustomizationPutChecksumInUserID>false</makeCustomizationPutChecksumInUserID>
+        <makeCustomizationEnableLongLines>false</makeCustomizationEnableLongLines>
+        <makeCustomizationNormalizeHexFile>false</makeCustomizationNormalizeHexFile>
+      </makeCustomizationType>
+      <HI-TECH-COMP>
+        <property key="asmlist" value="true"/>
+        <property key="define-macros" value=""/>
+        <property key="extra-include-directories" value="..\include;..\"/>
+        <property key="identifier-length" value="255"/>
+        <property key="operation-mode" value="free"/>
+        <property key="opt-xc8-compiler-strict_ansi" value="false"/>
+        <property key="optimization-assembler" value="true"/>
+        <property key="optimization-assembler-files" value="true"/>
+        <property key="optimization-debug" value="false"/>
+        <property key="optimization-global" value="true"/>
+        <property key="optimization-level" value="9"/>
+        <property key="optimization-set" value="default"/>
+        <property key="optimization-speed" value="false"/>
+        <property key="preprocess-assembler" value="true"/>
+        <property key="undefine-macros" value=""/>
+        <property key="use-cci" value="false"/>
+        <property key="use-iar" value="false"/>
+        <property key="verbose" value="false"/>
+        <property key="warning-level" value="0"/>
+        <property key="what-to-do" value="ignore"/>
+      </HI-TECH-COMP>
+      <HI-TECH-LINK>
+        <property key="additional-options-checksum" value=""/>
+        <property key="additional-options-code-offset" value="0x200"/>
+        <property key="additional-options-command-line" value=""/>
+        <property key="additional-options-errata" value=""/>
+        <property key="additional-options-extend-address" value="false"/>
+        <property key="additional-options-trace-type" value=""/>
+        <property key="additional-options-use-response-files" value="false"/>
+        <property key="backup-reset-condition-flags" value="false"/>
+        <property key="calibrate-oscillator" value="true"/>
+        <property key="calibrate-oscillator-value" value=""/>
+        <property key="clear-bss" value="true"/>
+        <property key="code-model-external" value="wordwrite"/>
+        <property key="code-model-rom" value="default,-0-1FF,-1F7F-1F7F"/>
+        <property key="create-html-files" value="false"/>
+        <property key="data-model-ram" value=""/>
+        <property key="data-model-size-of-double" value="24"/>
+        <property key="data-model-size-of-float" value="24"/>
+        <property key="display-class-usage" value="false"/>
+        <property key="display-hex-usage" value="false"/>
+        <property key="display-overall-usage" value="true"/>
+        <property key="display-psect-usage" value="false"/>
+        <property key="fill-flash-options-addr" value=""/>
+        <property key="fill-flash-options-const" value=""/>
+        <property key="fill-flash-options-how" value="0"/>
+        <property key="fill-flash-options-inc-const" value="1"/>
+        <property key="fill-flash-options-increment" value=""/>
+        <property key="fill-flash-options-seq" value=""/>
+        <property key="fill-flash-options-what" value="0"/>
+        <property key="format-hex-file-for-download" value="false"/>
+        <property key="initialize-data" value="true"/>
+        <property key="keep-generated-startup.as" value="false"/>
+        <property key="link-in-c-library" value="true"/>
+        <property key="link-in-peripheral-library" value="true"/>
+        <property key="managed-stack" value="false"/>
+        <property key="opt-xc8-linker-file" value="false"/>
+        <property key="opt-xc8-linker-link_startup" value="false"/>
+        <property key="opt-xc8-linker-serial" value=""/>
+        <property key="program-the-device-with-default-config-words" value="true"/>
+      </HI-TECH-LINK>
+      <Simulator>
+        <property key="breakoptions.coreerrors" value="Ignore"/>
+        <property key="breakoptions.corewarnings" value="Ignore"/>
+        <property key="breakoptions.peripheralerrors" value="Ignore"/>
+        <property key="breakoptions.peripheralwarnings" value="Ignore"/>
+        <property key="breakoptions.stimulusmessages.notes" value="Ignore"/>
+        <property key="breakoptions.stimulusmessags.errors" value="Ignore"/>
+        <property key="breakoptions.stimulusmessags.warnings" value="Ignore"/>
+        <property key="breakoptions.wdtwarnings" value="Ignore"/>
+        <property key="codecoverage.enabled" value="Disable"/>
+        <property key="codecoverage.enableoutputtofile" value="false"/>
+        <property key="codecoverage.outputfile" value=""/>
+        <property key="oscillator.auxfrequency" value="120"/>
+        <property key="oscillator.auxfrequencyunit" value="Mega"/>
+        <property key="oscillator.frequency" value="1"/>
+        <property key="oscillator.frequencyunit" value="Mega"/>
+        <property key="oscillator.rcfrequency" value="250"/>
+        <property key="oscillator.rcfrequencyunit" value="Kilo"/>
+        <property key="performancedata.show" value="false"/>
+        <property key="periphADC1.altscl" value="false"/>
+        <property key="periphADC1.minTacq" value=""/>
+        <property key="periphADC1.tacqunits" value="microseconds"/>
+        <property key="periphADC2.altscl" value="false"/>
+        <property key="periphADC2.minTacq" value=""/>
+        <property key="periphADC2.tacqunits" value="microseconds"/>
+        <property key="tracecontrol.include.timestamp" value="false"/>
+        <property key="tracecontrol.select" value="0"/>
+        <property key="tracecontrol.stallontracebufferfull" value="false"/>
+        <property key="tracecontrol.timestamp" value="2"/>
+        <property key="tracecontrol.tracebufmax" value="546000"/>
+        <property key="tracecontrol.tracefile"
+                  value="C:\code\mouseplay\mouseplay.X\defmplabxtrace.log"/>
+        <property key="tracecontrol.traceresetonrun" value="false"/>
+        <property key="uart1io.output" value="window"/>
+        <property key="uart1io.outputfile" value=""/>
+        <property key="uart1io.uartioenabled" value="false"/>
+      </Simulator>
+      <XC8-config-global>
+        <property key="output-file-format" value="-mcof,+elf"/>
+      </XC8-config-global>
+    </conf>
+  </confs>
+</configurationDescriptor>
