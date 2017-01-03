@@ -746,6 +746,7 @@ get_app_power_config
 	pagesel	APP_CONFIG
 	endif
 	call	APP_CONFIG		; config value returned in W
+	pagesel	get_app_power_config
 	banksel	APP_POWER_CONFIG
 	movwf	APP_POWER_CONFIG
 	return
