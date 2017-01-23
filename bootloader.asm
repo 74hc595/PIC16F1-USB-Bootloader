@@ -168,14 +168,14 @@ INTERRUPT_VECT
 	movlw	high BOOTLOADER_SIZE
 	subwf	TOSH,w
 	bnc	_bootloader_interrupt
-	pagesel	APP_INTERRUPT
-	goto	APP_INTERRUPT
 	else
 ; for 512-word mode: if TOSH == 0, we're in the bootloader
 ; if TOSH != 0, jump to the application interrupt handler
 	tstf	TOSH
-	bnz	APP_INTERRUPT
+	bz	_bootloader_interrupt
 	endif
+	pagesel	APP_INTERRUPT
+	goto	APP_INTERRUPT
 
 ; executing from the bootloader? it's a USB interrupt
 _bootloader_interrupt
