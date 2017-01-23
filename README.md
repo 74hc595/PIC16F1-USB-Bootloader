@@ -45,7 +45,8 @@ Once an in-system programmer has been used to program the bootloader onto a micr
 - The bootloader does not support hot-plugging. To reprogram the firmware on a self-powered device, it must be powered off, connected to the host, and then powered on.
 - The configuration words are hard-coded in the bootloader. The device is configured as follows:
     - Internal oscillator, no clock divider, PLL enabled, 3x PLL multiplier
-    - Fail-Safe Clock Monitor, Internal/External Switchover, clock output and watchdog timer are disabled
+    - Watchdog timer off but may be enabled by software (`SWDTEN` bit)
+    - Fail-Safe Clock Monitor, Internal/External Switchover, and clock output are disabled
     - Power-up timer, stack overflow reset, and brown-out reset are enabled
     - If an application requires a different configuration, the bootloader must be recompiled.
 - Applications that wish to use the USB interface cannot (easily) reuse the USB code in the bootloader. I'd like to address this in the future.
@@ -82,5 +83,5 @@ The contents of this repository, including the bootloader itself, the programmin
 
 Written by Matt Sarnoff.
 
-Twitter: [@autorelease](http://twitter.com/autorelease)
+Twitter: [@txsector](http://twitter.com/txsector)
 
