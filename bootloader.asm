@@ -249,6 +249,9 @@ _usb_ctrl_setup
 	bcf	USB_STATE,IS_CONTROL_WRITE
 ; get bmRequestType, but don't bother checking whether it's standard/class/vendor...
 ; the CDC and standard requests we'll receive have distinct bRequest numbers
+	bcf	BANKED_EP0OUT_STAT,UOWN	; dearm the OUT endpoint
+	bcf	BANKED_EP0IN_STAT,UOWN	; dearm the OUT endpoint
+
 	movfw	BANKED_EP0OUT_BUF+bmRequestType
 	btfss	BANKED_EP0OUT_BUF+bmRequestType,7	; is this host->device?
 	bsf	USB_STATE,IS_CONTROL_WRITE		; if so, this is a control write
@@ -346,8 +349,9 @@ _set_data_in_count_from_w
 	movwf	EP0_DATA_IN_COUNT
 ; the count needs to be set to the minimum of the descriptor's length (in W)
 ; and the requested length
-	subwf	BANKED_EP0OUT_BUF+wLengthL,w	; just ignore high byte...
-	bc	_usb_ctrl_complete		; if W <= f, no need to adjust
+	tstf	BANKED_EP0OUT_BUF+wLengthH		; test high byte...
+	bnz	_usb_ctrl_complete		            ; use length of descriptor
+
 	movfw	BANKED_EP0OUT_BUF+wLengthL
 	movwf	EP0_DATA_IN_COUNT
 	goto	_usb_ctrl_complete
