@@ -442,6 +442,8 @@ _bcopy	sublw	EP0_BUF_SIZE		; have we filled the buffer?
 ; write back the updated source pointer
 _bcdone	movfw	FSR0L
 	movwf	EP0_DATA_IN_PTR
+
+#ifdef ENABLE_POWER_CONFIG
 ; if we're sending the configuration descriptor, we need to inject the app's
 ; values for bus power/self power and max current consumption
 _check_for_config_bmattributes
@@ -462,6 +464,7 @@ _check_for_config_bmaxpower
 	movfw	APP_POWER_CONFIG
 	bcf	WREG,0			; value is in the upper 7 bits
 	movwf	BANKED_EP0IN_BUF+0
+#endif
 	return
 
 
@@ -744,6 +747,7 @@ app_is_present
 
 
 
+#ifdef ENABLE_POWER_CONFIG
 ;;; Gets the application's power config byte and stores it in APP_POWER_CONFIG.
 ;;; arguments:	none
 ;;; returns:	none
@@ -762,7 +766,7 @@ get_app_power_config
 	banksel	APP_POWER_CONFIG
 	movwf	APP_POWER_CONFIG
 	return
-
+#endif
 
 
 ;;; Initializes the USB system and resets all associated registers.
@@ -800,8 +804,10 @@ usb_init
 _ramclr	movwi	FSR0++
 	decfsz	FSR1H,f
 	goto	_ramclr
+#ifdef ENABLE_POWER_CONFIG
 ; get the app's power configuration (if it's present)
 	call	get_app_power_config
+#endif
 ; reset ping-pong buffers and address
 	banksel	UCON
 	bsf	UCON,PPBRST
