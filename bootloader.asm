@@ -189,7 +189,8 @@ _bootloader_interrupt
 	banksel	UIR
 	bcf	UIR,URSTIF	; clear the flag
 ; service transactions
-_utrans	banksel	UIR
+_utrans	
+	banksel	UIR
 	btfss	UIR,TRNIF
 	goto	_usdone
 	movfw	USTAT		; stash the status in a temp register
@@ -201,7 +202,8 @@ _utrans	banksel	UIR
 	call	usb_service_ep0	; handle the control message
 	goto	_utrans
 ; clear USB interrupt
-_usdone	banksel	PIR2
+_usdone
+	banksel	PIR2
 	bcf	PIR2,USBIF
 	retfie
 _ucdc	call	usb_service_cdc	; USTAT value is still in FSR1H
@@ -726,7 +728,7 @@ app_is_present
 	clrf	FSR0L
 	movlw	(high APP_ENTRY_POINT)|0x80	; need to set high bit to indicate program memory
 	movwf	FSR0H
-	moviw	FSR0
+	moviw	0[FSR0]
 	incw				; if W was 0xFF, it'll be 0 now
 	return				; Z flag will be unset if app code is present
 
