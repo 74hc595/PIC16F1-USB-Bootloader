@@ -174,7 +174,8 @@ INTERRUPT_VECT
 	tstf	TOSH
 	bz	_bootloader_interrupt
 	endif
-	pagesel	APP_INTERRUPT
+
+	movlp	high APP_INTERRUPT	; XC8 *expects* this
 	goto	APP_INTERRUPT
 
 ; executing from the bootloader? it's a USB interrupt
@@ -674,6 +675,9 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	bz	_bootloader_main	; if we have no application, enter bootloader mode
 
 ; We have a valid application? Check if the entry pin is grounded
+;	banksel	ANSELA				;disable analog function on pin
+;	bcf		ANSELA,ANSA3
+
 	banksel	PORTA
 	btfss	PORTA,RA3
 	goto	_bootloader_main	; enter bootloader mode if input is low
@@ -681,9 +685,11 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 ; We have a valid application and the entry pin is high. Start the application.
 	banksel	OPTION_REG
 	bsf	OPTION_REG,NOT_WPUEN	; but first, disable weak pullups
-	if APP_ENTRY_POINT>=2048
-	pagesel	APP_ENTRY_POINT
-	endif
+
+;	banksel	ANSELA				;enable analog function on pin
+;	bsf		ANSELA,ANSA3
+
+	movlp	high APP_ENTRY_POINT	; attempt to appease certain user apps
 	goto	APP_ENTRY_POINT
 
 ; Not entering application code: initialize the USB interface and wait for commands.
