@@ -197,7 +197,7 @@ _usb_ctrl_setup
 ; get bmRequestType, but don't bother checking whether it's standard/class/vendor...
 ; the CDC and standard requests we'll receive have distinct bRequest numbers
 	bcf	BANKED_EP0OUT_STAT,UOWN	; dearm the OUT endpoint
-	bcf	BANKED_EP0IN_STAT,UOWN	; dearm the OUT endpoint
+	bcf	BANKED_EP0IN_STAT,UOWN	; dearm the IN endpoint
 
 	movfw	BANKED_EP0OUT_BUF+bmRequestType
 	btfss	BANKED_EP0OUT_BUF+bmRequestType,7	; is this host->device?
