@@ -49,9 +49,14 @@
 ; With logging enabled, the bootloader will not fit in 512 words.
 ; Use this only for debugging!
 ; For more info, see log_macros.inc and log.asm.
+
 LOGGING_ENABLED		equ	0
-
-
+; Overdrive data in descriptor by app
+ENABLE_POWER_CONFIG	equ	0
+; Bootloader switch definition RA3
+USE_RA3_SWITCH		equ 0
+; Bootloader switch definition RC3 (external pull-up need for this pin)
+USE_RC3_SWITCH		equ 1
 
 	radix dec
 	list n=0,st=off
@@ -100,6 +105,7 @@ ALL_DESCS_TOTAL_LEN	equ	DEVICE_DESC_LEN+CONFIG_DESC_TOTAL_LEN+SERIAL_NUM_DESC_LE
 EP0_BUF_SIZE 		equ	8	; endpoint 0 buffer size
 EP1_OUT_BUF_SIZE	equ	64	; endpoint 1 OUT (CDC data) buffer size
 EP1_IN_BUF_SIZE		equ	1	; endpoint 1 IN (CDC data) buffer size (only need 1 byte to return status codes)
+EP2_IN_BUF_SIZE		equ	1	; endpoint 2 IN (CDC data) buffer size
 
 ; Since we're only using 5 endpoints, use the BDT area for buffers,
 ; and use the 4 bytes normally occupied by the EP2 OUT buffer descriptor for variables.
@@ -121,6 +127,9 @@ BANKED_EP1IN_BUF	equ	BANKED_EP0IN_BUF+EP0_BUF_SIZE+EXTRA_VARS_LEN
 
 EP1OUT_BUF		equ	EP1IN_BUF+EP1_IN_BUF_SIZE	; only use 1 byte for EP1 IN
 BANKED_EP1OUT_BUF	equ	BANKED_EP1IN_BUF+EP1_IN_BUF_SIZE
+
+EP2IN_BUF		equ	EP1OUT_BUF+EP1_OUT_BUF_SIZE	; only use 1 byte for EP2 IN
+BANKED_EP2IN_BUF	equ	BANKED_EP1OUT_BUF+EP1_OUT_BUF_SIZE
 
 ; High byte of all endpoint buffers.
 EPBUF_ADRH		equ	(EP0OUT_BUF>>8)
@@ -153,80 +162,17 @@ DEVICE_CONFIGURED	equ	2	; the device is configured
 	org	0x0000
 RESET_VECT
 ; Enable weak pull-ups
+#if USE_RA3_SWITCH
 	banksel	OPTION_REG
 	bcf	OPTION_REG,NOT_WPUEN
+#endif
 	banksel	OSCCON
 	goto	bootloader_start	; to be continued further down in the file
 
 	org	0x0004
 INTERRUPT_VECT
-; check the high byte of the return address (at the top of the stack)
-	banksel	TOSH
-	if LOGGING_ENABLED
-; for 4k-word mode: if TOSH < 0x10, we're in the bootloader
-; if TOSH >= 0x10, jump to the application interrupt handler
-	movlw	high BOOTLOADER_SIZE
-	subwf	TOSH,w
-	bnc	_bootloader_interrupt
-	else
-; for 512-word mode: if TOSH == 0, we're in the bootloader
-; if TOSH != 0, jump to the application interrupt handler
-	tstf	TOSH
-	bz	_bootloader_interrupt
-	endif
-
 	movlp	high APP_INTERRUPT	; XC8 *expects* this
 	goto	APP_INTERRUPT
-
-; executing from the bootloader? it's a USB interrupt
-_bootloader_interrupt
-	banksel	UIR
-; reset?
-	btfss	UIR,URSTIF
-	goto	_utrans		; not a reset? just start servicing transactions
-	call	usb_init	; if so, reset the USB interface (clears interrupts)
-	banksel	PIE2
-	bsf	PIE2,USBIE	; reenable USB interrupts
-	banksel	UIR
-	bcf	UIR,URSTIF	; clear the flag
-; service transactions
-_utrans	
-	banksel	UIR
-	btfss	UIR,TRNIF
-	goto	_usdone
-	movfw	USTAT		; stash the status in a temp register
-	movwf	FSR1H
-	bcf	UIR,TRNIF	; clear flag and advance USTAT fifo
-	banksel	BANKED_EP0OUT_STAT
-	andlw	b'01111000'	; check endpoint number
-	bnz	_ucdc		; if not endpoint 0, it's a CDC message
-	call	usb_service_ep0	; handle the control message
-	goto	_utrans
-; clear USB interrupt
-_usdone
-	banksel	PIR2
-	bcf	PIR2,USBIF
-	retfie
-_ucdc	call	usb_service_cdc	; USTAT value is still in FSR1H
-	goto	_utrans
-
-
-
-;;; Idle loop. In bootloader mode, the MCU just spins here, and all USB
-;;; communication is interrupt-driven.
-;;; This snippet is deliberately located within the first 256 words of program
-;;; memory, so we can easily check in the interrupt handler if the interrupt
-;;; occurred while executing application code or bootloader code.
-;;; (TOSH will be 0x00 when executing bootloader code, i.e. this snippet)
-bootloader_main_loop
-	bsf	INTCON,GIE	; enable interrupts
-_loop
-	if LOGGING_ENABLED
-; Print any pending characters in the log
-	call	log_service
-	endif
-	goto	_loop
-
 
 
 ;;; Handles a control transfer on endpoint 0.
@@ -443,7 +389,7 @@ _bcopy	sublw	EP0_BUF_SIZE		; have we filled the buffer?
 _bcdone	movfw	FSR0L
 	movwf	EP0_DATA_IN_PTR
 
-#ifdef ENABLE_POWER_CONFIG
+#if ENABLE_POWER_CONFIG
 ; if we're sending the configuration descriptor, we need to inject the app's
 ; values for bus power/self power and max current consumption
 _check_for_config_bmattributes
@@ -502,6 +448,7 @@ usb_service_cdc
 	bz	arm_ep1_out		; (just ignore them and rearm the OUT buffer)
 	bcf	BANKED_EP1IN_STAT,UOWN
 	call	bootloader_exec_cmd	; execute command; status returned in W
+	
 	banksel	BANKED_EP1IN_BUF
 	movwf	BANKED_EP1IN_BUF	; copy status to IN buffer
 	movlw	1
@@ -678,9 +625,18 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	bz	_bootloader_main	; if we have no application, enter bootloader mode
 
 ; We have a valid application? Check if the entry pin is grounded
-;	banksel	ANSELA				;disable analog function on pin
-;	bcf		ANSELA,ANSA3
 
+
+#if USE_RC3_SWITCH
+	banksel	ANSELC				;disable analog function on pin
+	bcf		ANSELC,ANSC3
+
+	banksel	PORTC
+	btfss	PORTC,RC3
+	goto	_bootloader_main	; enter bootloader mode if input is low
+#endif
+
+#if USE_RA3_SWITCH
 	banksel	PORTA
 	btfss	PORTA,RA3
 	goto	_bootloader_main	; enter bootloader mode if input is low
@@ -688,19 +644,20 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 ; We have a valid application and the entry pin is high. Start the application.
 	banksel	OPTION_REG
 	bsf	OPTION_REG,NOT_WPUEN	; but first, disable weak pullups
+#endif
 
-;	banksel	ANSELA				;enable analog function on pin
-;	bsf		ANSELA,ANSA3
+#if USE_RC3_SWITCH
+	banksel	ANSELC				;enable analog function on pin
+	bsf		ANSELC,ANSC3
+#endif
 
 	movlp	high APP_ENTRY_POINT	; attempt to appease certain user apps
 	goto	APP_ENTRY_POINT
 
+
 ; Not entering application code: initialize the USB interface and wait for commands.
 _bootloader_main
 ; Enable active clock tuning
-	banksel	ACTCON
-	movlw	(1<<ACTSRC)|(1<<ACTEN)
-	movwf	ACTCON		; source = USB
 
 	if LOGGING_ENABLED
 	call	uart_init
@@ -708,6 +665,10 @@ _bootloader_main
 	call	log_init
 	logch	'^',LOG_NEWLINE
 	endif
+
+	movlw	(1<<ACTSRC)|(1<<ACTEN)
+	movwf	ACTCON		; source = USB
+
 
 ; Initialize USB
 	call	usb_init
@@ -717,20 +678,53 @@ _usb_attach
 	logch	'A',0
 	banksel	UCON		; reset UCON
 	clrf	UCON
-	banksel	PIE2
-	bsf	PIE2,USBIE	; enable USB interrupts
-	bsf	INTCON,PEIE
-	banksel	UCON
-_usben	bsf	UCON,USBEN	; enable USB module and wait until ready
+	banksel	UCON		; reset UCON
+_usben
+	bsf	UCON,USBEN		; enable USB module and wait until ready
 	btfss	UCON,USBEN
 	goto	_usben
 	logch	'!',LOG_NEWLINE
 
-; Enable interrupts and enter an idle loop
-; (Loop code is located at the top of the file, in the first 256 words of
-; program memory)
-	goto	bootloader_main_loop
 
+;;; Idle loop. In bootloader mode, the MCU just spins here, and all USB
+;;; communication is interrupt-driven.
+;;; This snippet is deliberately located within the first 256 words of program
+;;; memory, so we can easily check in the interrupt handler if the interrupt
+;;; occurred while executing application code or bootloader code.
+;;; (TOSH will be 0x00 when executing bootloader code, i.e. this snippet)
+bootloader_main_loop
+
+	if LOGGING_ENABLED
+; Print any pending characters in the log
+	call	log_service
+	endif
+
+	banksel	UIR
+; reset?
+	btfss	UIR,URSTIF
+	goto	_utrans		; not a reset? just start servicing transactions
+	call	usb_init	; if so, reset the USB interface (clears interrupts)
+	banksel	UIR
+	bcf	UIR,URSTIF	; clear the flag
+; service transactions
+_utrans
+	banksel	UIR
+	btfss	UIR,TRNIF
+	goto bootloader_main_loop
+	movfw	USTAT		; stash the status in a temp register
+	movwf	FSR1H
+	bcf	UIR,TRNIF	; clear flag and advance USTAT fifo
+
+	banksel	BANKED_EP0OUT_STAT
+	andlw	b'01111000'	; check endpoint number
+	bnz	_ucdc		; if not endpoint 0, it's a CDC message
+	call	usb_service_ep0	; handle the control message
+	goto	_utrans
+
+
+_ucdc	
+	call	usb_service_cdc	; USTAT value is still in FSR1H
+	goto	_utrans
 
 
 ;;; Determines if application code is present in flash memory.
@@ -747,7 +741,7 @@ app_is_present
 
 
 
-#ifdef ENABLE_POWER_CONFIG
+#if ENABLE_POWER_CONFIG
 ;;; Gets the application's power config byte and stores it in APP_POWER_CONFIG.
 ;;; arguments:	none
 ;;; returns:	none
@@ -775,14 +769,13 @@ get_app_power_config
 ;;; clobbers:	W, BSR, FSR0, FSR1H
 usb_init
 	logch	'R',LOG_NEWLINE
-; disable USB interrupts
-	banksel	PIE2
-	bcf	PIE2,USBIE
 ; clear USB registers
 	banksel	UEIR
 	clrf	UEIR
 	clrf	UIR
 ; disable endpoints we won't use
+	clrf	UEP1
+	clrf	UEP2
 	clrf	UEP3
 	clrf	UEP4
 	clrf	UEP5
@@ -804,7 +797,7 @@ usb_init
 _ramclr	movwi	FSR0++
 	decfsz	FSR1H,f
 	goto	_ramclr
-#ifdef ENABLE_POWER_CONFIG
+#if ENABLE_POWER_CONFIG
 ; get the app's power configuration (if it's present)
 	call	get_app_power_config
 #endif
@@ -827,12 +820,14 @@ _tflush	btfss	UIR,TRNIF
 ; my intuition was that I should wait until a SET_CONFIGURATION is received
 ; before setting up endpoints 1 and 2... but there seemed to be a timing issue
 ; when doing so, so I moved them here
-_initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
+_initep	
+	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	UEP0
 	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	UEP1
 	movlw	(1<<EPHSHK)|(1<<EPCONDIS)|(1<<EPINEN)
 	movwf	UEP2
+		
 ; initialize endpoint buffers and counts
 	banksel	BANKED_EP0OUT_ADRL
 	movlw	low EP0OUT_BUF	; set endpoint 0 OUT address low
@@ -843,11 +838,15 @@ _initep	movlw	(1<<EPHSHK)|(1<<EPOUTEN)|(1<<EPINEN)
 	movwf	BANKED_EP1OUT_ADRL
 	movlw	low EP1IN_BUF	; set endpoint 1 IN address low
 	movwf	BANKED_EP1IN_ADRL
+	movlw	low EP2IN_BUF	; set endpoint 2 IN address low
+	movwf	BANKED_EP2IN_ADRL
 	movlw	EPBUF_ADRH	; set all ADRH values
 	movwf	BANKED_EP0OUT_ADRH
 	movwf	BANKED_EP0IN_ADRH
 	movwf	BANKED_EP1OUT_ADRH
 	movwf	BANKED_EP1IN_ADRH
+	movwf	BANKED_EP2IN_ADRH
+
 	goto	arm_ep0_out
 
 
