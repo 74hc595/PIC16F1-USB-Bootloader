@@ -296,9 +296,11 @@ _set_data_in_count_from_w
 	movwf	EP0_DATA_IN_COUNT
 ; the count needs to be set to the minimum of the descriptor's length (in W)
 ; and the requested length
-	tstf	BANKED_EP0OUT_BUF+wLengthH		; test high byte...
-	bnz	_usb_ctrl_complete		            ; use length of descriptor
+	tstf	BANKED_EP0OUT_BUF+wLengthH	; test high byte...
+	bnz	_usb_ctrl_complete		; use length of descriptor
 
+	subwf	BANKED_EP0OUT_BUF+wLengthL,w	
+	bc	_usb_ctrl_complete		; if W <= f, no need to adjust
 	movfw	BANKED_EP0OUT_BUF+wLengthL
 	movwf	EP0_DATA_IN_COUNT
 	goto	_usb_ctrl_complete
