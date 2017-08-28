@@ -1,0 +1,18 @@
+CC		= gcc
+SVNVERS         = $(shell svnversion)
+CFLAGS          = -Wall -g -O -DMINGW32 -Ilibusb-win32 -Ihidapi -DSVNVERSION='"$(SVNVERS)"'
+LDFLAGS         = -s
+
+
+
+PROG_OBJS       = usb16f1prog.o sp.o 
+
+all:		usb16f1prog.exe
+
+usb16f1prog.exe:$(PROG_OBJS)
+		$(CC) $(LDFLAGS) -o $@ $(PROG_OBJS) $(LIBS)
+
+
+###
+#pic32prog.o: pic32prog.c target.h localize.h
+#target.o: target.c target.h adapter.h localize.h pic32.h
