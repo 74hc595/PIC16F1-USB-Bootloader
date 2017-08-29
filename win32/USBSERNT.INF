@@ -1,0 +1,51 @@
+; Windows 2000 and XP setup File for CDC
+
+[Version]
+Signature="$Windows NT$"
+Class=Ports
+ClassGuid={4D36E978-E325-11CE-BFC1-08002BE10318}
+Provider=%MICROSOFT%
+DriverVer=10/15/1999,5.0.2153.1
+
+[Manufacturer]
+%MICROSOFT%=Device
+
+
+[Device]
+%USB_CDC%=Reader, USB\VID_1D50&PID_EEEE
+
+[Reader_Install.NTx86]
+;Windows2000
+
+[DestinationDirs]
+DefaultDestDir=12
+Reader.NT.Copy=12
+
+[Reader.NT]
+CopyFiles=Reader.NT.Copy
+AddReg=Reader.NT.AddReg
+
+[Reader.NT.Copy]
+;usbser.sys
+
+[Reader.NT.AddReg]
+HKR,,DevLoader,,*ntkern
+HKR,,NTMPDriver,,usbser.sys
+HKR,,EnumPropPages32,,"MsPorts.dll,SerialPortPropPageProvider"
+
+[Reader.NT.Services]
+AddService = usbser, 0x00000002, Service_Inst
+
+[Service_Inst]
+DisplayName = %Serial.SvcDesc%
+ServiceType = 1 ; SERVICE_KERNEL_DRIVER
+StartType = 3 ; SERVICE_DEMAND_START
+ErrorControl = 1 ; SERVICE_ERROR_NORMAL
+ServiceBinary = %12%\usbser.sys
+LoadOrderGroup = Base
+
+[Strings]
+MICROSOFT = "Microsoft, Inc."
+USB_CDC = "CDC USB to UART"
+Serial.SvcDesc = "USB Serial emulation driver"
+
