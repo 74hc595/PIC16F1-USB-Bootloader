@@ -34,6 +34,12 @@ Downloading can be accomplished with the existing [dfu-util](http://dfu-util.sou
 dfu-util -D write.dfu
 ```
 
+## Limitations
+
+* A PIC16F145x chip of silicon revision A5 or later is required due to an issue with writing to program memory on revision A2 parts. The value at address 0x8006 in configuration space should be 0x1005 or later. See the [silicon errata document](http://ww1.microchip.com/downloads/en/DeviceDoc/80000546F.pdf) for more information.
+
+* The configuration words are hard-coded in the bootloader (see the __config lines in bootloader.asm); the downloaded app inherits these settings and cannot invoke different values.
+
 ## License
 
 The contents of this repository are released under a [3-clause BSD license](http://opensource.org/licenses/BSD-3-Clause).
