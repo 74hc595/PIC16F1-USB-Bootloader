@@ -9,7 +9,7 @@ Matt Sarnoff demonstrated what is possible with his excellent hand-optimized ass
 
 Its minimal size rightfully puts to shame existing C-code-based bootloaders such as [mine](https://github.com/majbthrd/pic16f1454-bootloader).
 
-This project takes the concept of Matt's bootloader, but overhauled the code to instead implement the industry-standard [DFU protocol](http://www.usb.org/developers/docs/devclass_docs/DFU_1.1.pdf) that is supported under multiple Operating Systems via existing tools such as [dfu-util](http://dfu-util.sourceforge.net/).
+This project takes the concept of Matt's bootloader, but overhauled the code to instead implement the industry-standard [DFU protocol](http://www.usb.org/developers/docs/devclass_docs/DFU_1.1.pdf) that is supported under multiple Operating Systems via existing tools such as [dfu-util](http://dfu-util.sourceforge.net/) and [webdfu](https://github.com/devanlai/webdfu).
 
 This bootloader also has the added advantage of CRC-14 protection of the user application. 
 
@@ -28,7 +28,7 @@ The utility provided in the ./tools/ subdirectory converts a .hex file into a CR
 454hex2dfu foo.hex foo.dfu
 ```
 
-Downloading can be accomplished with the existing [dfu-util](http://dfu-util.sourceforge.net/) utilities:
+Downloading can be accomplished with your DFU software of choice.  For [dfu-util](http://dfu-util.sourceforge.net/), usage would be like so:
 
 ```
 dfu-util -D write.dfu

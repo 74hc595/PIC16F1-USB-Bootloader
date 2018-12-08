@@ -752,7 +752,7 @@ OPPORTUNISTIC_1_CONSTANT
 	dt	EP0_BUF_SIZE	; bMaxPacketSize0
 	dt	low USB_VENDOR_ID, high USB_VENDOR_ID	; idVendor
 	dt	low USB_PRODUCT_ID, high USB_PRODUCT_ID	; idProduct
-	dt	0x01, 0x00	; bcdDevice (1)
+	dt	0x02, 0x00	; bcdDevice (2)
 	dt	0x00		; iManufacturer
 	dt	0x00		; iProduct
 	if HIDE_SERIAL_NUMBER
@@ -780,7 +780,7 @@ INTERFACE_DESCRIPTOR
 	dt	0x00		; bNumEndpoints
 	dt	0xFE		; bInterfaceClass
 	dt	0x01		; bInterfaceSubclass
-	dt	0x00		; bInterfaceProtocol
+	dt	0x02		; bInterfaceProtocol
 	dt	0x00		; iInterface
 
 ; omit in a pinch?  at nine words (plus change to CONFIG_DESC_TOTAL_LEN), this is a rather 
