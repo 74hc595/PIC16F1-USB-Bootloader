@@ -13,6 +13,8 @@ This project takes the concept of Matt's bootloader, but overhauled the code to 
 
 This bootloader also has the added advantage of CRC-14 protection of the user application. 
 
+A list of commercial products that already use this bootloader is [available on the wiki](https://github.com/majbthrd/PIC16F1-USB-DFU-Bootloader/wiki/commercial-products-that-already-use-PIC16F1-USB-DFU-Bootloader).
+
 ## Usage
 
 For MPLAB/XC8 compilation, the following options are needed:
