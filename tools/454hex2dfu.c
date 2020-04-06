@@ -81,6 +81,7 @@ int main(int argc, char *argv[])
 	if (NULL == output)
 	{
 		fprintf(stderr, "ERROR: unable to open output file %s\n", argv[2]);
+		fclose(input);
 		return -1;
 	}
 
@@ -130,7 +131,7 @@ int main(int argc, char *argv[])
 	if (flags.out_of_bounds)
 	{
 		fprintf(stderr, "ERROR: supplied input file is faulty and used out-of-bounds addresses\n");
-		goto skip_write;
+		goto skip_ahead;
 	}
 
 	address = CODE_OFFSET_ADDRESS << 1; crc = 0;
@@ -154,7 +155,7 @@ int main(int argc, char *argv[])
 	if (flags.crc_overlap)
 	{
 		fprintf(stderr, "ERROR: CRC address was occupied; app is in conflict with bootloader\n");
-		goto skip_write;
+		goto skip_ahead;
 	}
 
 	suffix = image + PM_SIZE_IN_BYTES;
@@ -182,9 +183,9 @@ int main(int argc, char *argv[])
 	assert(DFU_SUFFIX == count);
 
 	fwrite(image, 1, PM_SIZE_IN_BYTES + count, output);
-	fclose(output);
 
-skip_write:
+skip_ahead:
+	fclose(output);
 	free(image);
 
 	return 0;
