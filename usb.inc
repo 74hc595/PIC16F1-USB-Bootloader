@@ -6,6 +6,7 @@
 ; Released under a 3-clause BSD license: see the accompanying LICENSE file.
 ;
 ; USB-related constants.
+BDnSTAT_PID_MASK	equ	(0x3C)
 
 ; USB PID values
 PID_OUT		equ	(0x1<<PID0)
@@ -66,3 +67,5 @@ DESC_OTHER_SPD	equ	0x07
 DESC_INTF_PWR	equ	0x08
 DESC_OTG	equ	0x09
 
+; USTAT Fields
+USTAT_ENDP_MASK	equ	0x78
