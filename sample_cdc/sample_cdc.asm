@@ -26,6 +26,8 @@
 ; For more info, see log_macros.inc and log.asm.
 LOGGING_ENABLED		equ	1
 
+; Code to include USB code from bootloader
+USE_BOOTLOADER_CDC	equ	1
 ; Code update for polling or interrupt driven USB. 
 USB_INTERRUPTS		equ	1
 
@@ -77,15 +79,15 @@ EXPECTED_CHECKSUM	equ	BANKED_EP0IN_BUF+EP0_BUF_SIZE	; for saving expected checks
 ; - - - - - - - - - - - - - - 
 ; API from bootloader
 ; - - - - - - - - - - - - - - 
-APP_STARTUP org 0x200
+  org APP_ENTRY_POINT
   pagesel _app_main
   goto    _app_main
 
-APP_CONFIG org 0x202
+  org APP_CONFIG
   pagesel _app_config
   goto    _app_config ; must end with 'retlw' instruction
 
-APP_INTERRUPT org 0x204
+  org APP_INTERRUPT
   pagesel _app_interrupt
   call    _app_interrupt
   retfie
@@ -152,10 +154,14 @@ bootloader_main_loop
 	bsf	INTCON,GIE	; enable interrupts 
 
 _loop
-	call 	usb_event_handler ; Polling to check for USB events
+	if USB_INTERRUPTS
+	else
+	  call 	usb_event_handler ; Polling to check for USB events
+	endif
+
 	if LOGGING_ENABLED
 ; Print any pending characters in the log
-	call	log_service
+	  call	log_service
 	endif
 
 	BANKSEL BUTTON_PORT
