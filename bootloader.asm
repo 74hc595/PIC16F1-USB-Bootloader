@@ -663,6 +663,13 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	sublw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 	bnz	_wosc
 
+#ifdef CDC_APPLICATION
+; Enable active clock tuning
+    banksel ACTCON ; BSR=9
+       movlw   (1<<ACTSRC)|(1<<ACTEN)
+       movwf   ACTCON          ; source = USB
+#endif
+
 ; Check for valid application code: the lower 8 bits of the first word cannot be 0xFF
 	call	app_is_present
 	bz	_bootloader_main	; if we have no application, enter bootloader mode
@@ -682,11 +689,12 @@ _wosc	movlw	(1<<PLLRDY)|(1<<HFIOFR)|(1<<HFIOFS)
 
 ; Not entering application code: initialize the USB interface and wait for commands.
 _bootloader_main
+#ifndef CDC_APPLICATION
 ; Enable active clock tuning
 	banksel	ACTCON
 	movlw	(1<<ACTSRC)|(1<<ACTEN)
 	movwf	ACTCON		; source = USB
-
+#endif
 	if LOGGING_ENABLED
 	call	uart_init
 ; Print a power-on character

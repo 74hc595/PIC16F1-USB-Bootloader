@@ -42,6 +42,9 @@ MDB = $(MPLABX_DIR)/mplab_ide.app/Contents/Resources/mplab_ide/bin/mdb.sh
 
 HEX = $(OUT).hex
 
+import_list.inc: export_list $(HEX)
+	./export_symbols.sh
+
 # Link
 $(HEX): $(ASM)
 	$(AS) -p $(AS_DEVICE) -DSERIAL_NUMBER=$(SERIAL_NUMBER) -o $(HEX) $(ASM)
@@ -66,7 +69,7 @@ list-devices:
 
 # Clean
 clean:
-	rm -f $(ASM:.asm=.lst) $(HEX) $(OUT).cod $(OUT).lst
+	rm -f $(ASM:.asm=.lst) $(HEX) $(OUT).cod $(OUT).lst import_list.inc
 
 .PHONY: all flash clean list-devices
 

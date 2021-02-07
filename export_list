@@ -1,0 +1,4 @@
+usb_init
+usb_service_ep0
+ep0_read_in
+flash_unlock
