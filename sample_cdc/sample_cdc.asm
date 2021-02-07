@@ -15,7 +15,7 @@
 ; Protocol for talking to the firmware:
 ;     <That's up to you... it's your demo now!>
 ; I've left the command handler framework from the bootloader in place
-; for review. A lot but the retlw after the logch 'C' prevents any of 
+; for review, however the retlw after the logch 'C' prevents any of 
 ; it from being executed. 
 ;
 ; Code notes:
@@ -220,7 +220,7 @@ bootloader_exec_cmd
         retlw	BSTAT_OK ; Quit with "SUCCESS" add more code in time
 
 ; Currently Cloned from the original bootloader code
-; The Bootloader supports 3 messages, and uses the packet length packet length
+; The Bootloader supports 3 messages, and uses the packet length 
 ; to denote which is which.
 
 	movlw	BCMD_SET_PARAMS_LEN ; SIZE=4 ADRL, ADRH, CKSUM, ERASE
