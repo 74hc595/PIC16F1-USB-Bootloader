@@ -3,3 +3,4 @@
 *.cod
 MPLABXLog.*
 *.o
+import_list.inc
