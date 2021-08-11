@@ -44,7 +44,7 @@ $(HEX): $(ASM)
 
 # Disassemble
 dis: $(HEX)
-	$(DASM) -p p$(AS_DEVICE) $(HEX)
+	$(DASM) -p $(AS_DEVICE) $(HEX)
 
 # List supported device types
 list-devices:
